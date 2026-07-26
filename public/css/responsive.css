@@ -1,0 +1,178 @@
+/* =====================================================================
+   responsive.css — FASE 8 (responsive)
+   ---------------------------------------------------------------------
+   Este archivo NO reemplaza public/css/app.css (no tengo ese archivo,
+   ver nota en el chat). Es un archivo ADITIVO, cargado después de
+   app.css, que:
+     1) Convierte el sidebar en un drawer deslizable en pantallas chicas
+        (usa una clase propia, .sidebar--mobile-open, para no chocar con
+        nada que ya exista en tu JS/CSS).
+     2) Agrega breakpoints para las grillas, tablas, formularios y modales
+        de las pantallas que construimos en las Fases 1-7.
+   Si más adelante me pasas tu app.css real, esto se puede fusionar ahí
+   directamente en vez de vivir en un archivo aparte.
+   ===================================================================== */
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: hidden; }
+
+img { max-width: 100%; }
+
+/* ---------- Sidebar como drawer en mobile/tablet ---------- */
+@media (max-width: 900px) {
+    .sidebar {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        width: 260px;
+        max-width: 80vw;
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        z-index: 1000;
+        box-shadow: 2px 0 16px rgba(0,0,0,.15);
+    }
+
+    .sidebar.sidebar--mobile-open {
+        transform: translateX(0);
+    }
+
+    .sidebar-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.4);
+        z-index: 999;
+    }
+
+    .sidebar-backdrop.sidebar-backdrop--visible {
+        display: block;
+    }
+
+    .main-content {
+        margin-left: 0 !important;
+        width: 100% !important;
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    .navbar {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    .brand-sub { display: none; }
+}
+
+/* ---------- Encabezados de página ---------- */
+@media (max-width: 768px) {
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: .75rem;
+    }
+
+    .page-actions {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem;
+    }
+
+    .page-actions .btn,
+    .page-actions a.btn {
+        flex: 1 1 auto;
+        text-align: center;
+        justify-content: center;
+    }
+
+    .page-title { font-size: 1.25rem !important; }
+}
+
+/* ---------- Grillas de estadísticas y layouts de 2 columnas ---------- */
+@media (max-width: 992px) {
+    .grid-2 {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .stat-card {
+        flex-direction: row;
+    }
+}
+
+/* ---------- Tablas: scroll horizontal en vez de romper el layout ---------- */
+@media (max-width: 768px) {
+    .card-body {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+        min-width: 560px;
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* ---------- Formularios (filtros de horarios, auditoría, criterios, notas) ---------- */
+@media (max-width: 640px) {
+    form[style*="flex"] {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+
+    form[style*="flex"] .form-group {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    form[style*="flex"] button,
+    form[style*="flex"] a.btn {
+        width: 100%;
+    }
+}
+
+/* ---------- Modales ---------- */
+@media (max-width: 640px) {
+    .modal-overlay {
+        padding: 12px;
+    }
+
+    .modal,
+    .modal-overlay > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+}
+
+/* ---------- Horario semanal: scroll horizontal por días ---------- */
+@media (max-width: 900px) {
+    .horario-grid {
+        min-width: 0 !important;
+    }
+}
+
+/* ---------- Student cell / avatares no se rompen en columnas angostas ---------- */
+@media (max-width: 480px) {
+    .student-cell {
+        flex-wrap: wrap;
+    }
+}
