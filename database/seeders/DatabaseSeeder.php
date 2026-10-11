@@ -34,7 +34,7 @@ class DatabaseSeeder extends Seeder
         $estudiantes = $this->seedEstudiantes($grados, $secciones);
         $this->seedApoderados($estudiantes);
         $this->seedNotas($estudiantes, $cursos, $periodos, $lookup, $docentes[0]['id']);
-        $this->seedActividades($asignaciones, $periodos);
+        $this->seedActividades($asignaciones, $periodos, $grados);
         $this->seedConductas($estudiantes, $demoIds);
         $this->seedAsistencias($estudiantes, $grados, $lookup);
         $this->seedSesionesPsicologia($estudiantes, $demoIds['psicologa_id']);
@@ -210,9 +210,10 @@ class DatabaseSeeder extends Seeder
     }
 
     /**
-     * 15 docentes: 9 especialistas de Secundaria (uno por curso, dictan en los 5 grados)
+     * 14 cuentas de docente: 9 especialistas de Secundaria (uno por curso, dictan en los 5 grados)
      * y 6 tutores de Primaria (uno por grado, dictan todos los cursos de su grado).
-     * El primero (Matemática - Secundaria) conserva el login de pruebas docente@eduseguimiento.com.
+     * El login de pruebas docente@eduseguimiento.com (Matemática - Secundaria) tiene además el rol
+     * de tutor de Primaria 1°, para poder explorar ambos niveles desde una sola cuenta.
      */
     private function seedDocentes(): array
     {
@@ -224,16 +225,24 @@ class DatabaseSeeder extends Seeder
 
         $docentes = [];
         $n = 1;
+        $primerDocenteId = null;
+        $primerDocenteNombre = null;
 
         foreach ($cursosSecundaria as $i => $curso) {
             $nombre = $this->faker->firstName() . ' ' . $this->faker->lastName() . ' ' . $this->faker->lastName();
             $email = $n === 1 ? 'docente@eduseguimiento.com' : "docente{$n}@eduseguimiento.com";
             $id = $this->crearUsuario($nombre, $email, 2);
             $docentes[] = ['id' => $id, 'nombre' => $nombre, 'tipo' => 'secundaria', 'curso' => $curso];
+            if ($n === 1) { $primerDocenteId = $id; $primerDocenteNombre = $nombre; }
             $n++;
         }
 
-        foreach ($gradosPrimaria as $g) {
+        // La cuenta demo principal (docente@eduseguimiento.com) queda además como tutora de
+        // "Primaria 1°", para que desde un solo login se pueda explorar tanto Secundaria como
+        // Primaria (antes solo tenía cursos de Secundaria y Primaria no se veía desde ahí).
+        $docentes[] = ['id' => $primerDocenteId, 'nombre' => $primerDocenteNombre, 'tipo' => 'primaria_tutor', 'grado' => 'Primaria 1°'];
+
+        foreach (array_slice($gradosPrimaria, 1) as $g) {
             $nombre = $this->faker->firstName() . ' ' . $this->faker->lastName() . ' ' . $this->faker->lastName();
             $id = $this->crearUsuario($nombre, "docente{$n}@eduseguimiento.com", 2);
             $docentes[] = ['id' => $id, 'nombre' => $nombre, 'tipo' => 'primaria_tutor', 'grado' => "Primaria $g"];
@@ -357,8 +366,10 @@ class DatabaseSeeder extends Seeder
      * con entregas de los estudiantes en estados variados (pendiente / entregado / calificado) para
      * poder probar de inmediato el flujo docente-sube-trabajo → alumno-entrega → docente-califica.
      */
-    private function seedActividades(array $asignaciones, array $periodos): void
+    private function seedActividades(array $asignaciones, array $periodos, array $grados): void
     {
+        $nivelesPorGradoId = collect($grados)->pluck('nivel', 'id');
+
         $periodoId = $periodos[0]; // Bimestre I
 
         $titulos = [
@@ -385,6 +396,7 @@ class DatabaseSeeder extends Seeder
                 'titulo' => $titulos[$tipo] . ' — ' . $a['curso_nombre'],
                 'instrucciones' => "Desarrolla las actividades propuestas para la unidad 1 de {$a['curso_nombre']}. Presenta tu trabajo ordenado, con nombre completo, grado y sección. Se evaluará orden, claridad y correcta aplicación de los conceptos revisados en clase.",
                 'tipo_evaluacion' => $tipo,
+                'peso' => peso_por_defecto($tipo),
                 'fecha_entrega' => \Carbon\Carbon::parse("{$this->anio}-04-10")->format('Y-m-d'),
                 'archivo_path' => null,
                 'activo' => 1,
@@ -403,7 +415,7 @@ class DatabaseSeeder extends Seeder
                     $filasEntregas[] = [
                         'id' => $entregaId, 'actividad_id' => $actividadId, 'estudiante_id' => $estId,
                         'estado' => 'pendiente', 'archivo_path' => null, 'comentario_estudiante' => null,
-                        'nota' => null, 'observacion_docente' => null, 'entregado_en' => null, 'calificado_en' => null,
+                        'nota' => null, 'nota_letra' => null, 'observacion_docente' => null, 'entregado_en' => null, 'calificado_en' => null,
                         'created_at' => now(), 'updated_at' => now(),
                     ];
                 } elseif ($mod === 1) {
@@ -411,17 +423,20 @@ class DatabaseSeeder extends Seeder
                     $filasEntregas[] = [
                         'id' => $entregaId, 'actividad_id' => $actividadId, 'estudiante_id' => $estId,
                         'estado' => 'entregado', 'archivo_path' => null, 'comentario_estudiante' => 'Aquí adjunto mi trabajo, cualquier corrección avísenme.',
-                        'nota' => null, 'observacion_docente' => null,
+                        'nota' => null, 'nota_letra' => null, 'observacion_docente' => null,
                         'entregado_en' => now()->subDays(random_int(1, 5)), 'calificado_en' => null,
                         'created_at' => now(), 'updated_at' => now(),
                     ];
                 } else {
                     // calificado
-                    $nota = random_int(10, 20);
+                    $esPrimaria = es_nivel_primaria($nivelesPorGradoId->get($a['grado_id']));
+                    $notaLetra = $esPrimaria ? $this->faker->randomElement(['AD', 'A', 'A', 'B']) : null;
+                    $nota = $esPrimaria ? nota_desde_letra($notaLetra) : random_int(10, 20);
                     $filasEntregas[] = [
                         'id' => $entregaId, 'actividad_id' => $actividadId, 'estudiante_id' => $estId,
                         'estado' => 'calificado', 'archivo_path' => null, 'comentario_estudiante' => 'Entrego mi trabajo completo.',
-                        'nota' => $nota, 'observacion_docente' => $nota >= 14 ? 'Buen trabajo, cumple con lo solicitado.' : 'Cumple parcialmente, reforzar para la próxima entrega.',
+                        'nota' => $nota, 'nota_letra' => $notaLetra,
+                        'observacion_docente' => $nota >= 14 ? 'Buen trabajo, cumple con lo solicitado.' : 'Cumple parcialmente, reforzar para la próxima entrega.',
                         'entregado_en' => now()->subDays(random_int(6, 10)), 'calificado_en' => now()->subDays(random_int(1, 5)),
                         'created_at' => now(), 'updated_at' => now(),
                     ];
@@ -438,7 +453,9 @@ class DatabaseSeeder extends Seeder
                         'tipo_evaluacion' => $tipo,
                         'nombre_evaluacion' => $titulos[$tipo] . ' — ' . $a['curso_nombre'],
                         'nota' => $nota,
+                        'nota_letra' => $notaLetra,
                         'nota_maxima' => 20,
+                        'peso' => peso_por_defecto($tipo),
                         'observacion' => null,
                         'fecha' => now()->subDays(random_int(1, 5))->format('Y-m-d'),
                         'creado_en' => now(),
@@ -577,6 +594,8 @@ class DatabaseSeeder extends Seeder
                 foreach (array_slice($periodos, 0, 2) as $periodoId) {
                     $nota = $enRiesgo ? random_int(5, 10) : random_int(8, 20);
                     $nivel = $nota >= 18 ? 'AD' : ($nota >= 14 ? 'A' : ($nota >= 11 ? 'B' : 'C'));
+                    $esPrimaria = es_nivel_primaria($est['nivel'] ?? null);
+                    $tipo = $this->faker->randomElement($tipos);
                     $filas[] = [
                         'id' => (string) Str::uuid(),
                         'estudiante_id' => $est['id'],
@@ -585,10 +604,12 @@ class DatabaseSeeder extends Seeder
                         'periodo_id' => $periodoId,
                         'grado_id' => null,
                         'seccion' => $est['seccion'],
-                        'tipo_evaluacion' => $this->faker->randomElement($tipos),
+                        'tipo_evaluacion' => $tipo,
                         'nombre_evaluacion' => 'Evaluación ' . $nombreCurso,
-                        'nota' => $nota,
+                        'nota' => $esPrimaria ? nota_desde_letra($nivel) : $nota,
+                        'nota_letra' => $esPrimaria ? $nivel : null,
                         'nota_maxima' => 20,
+                        'peso' => peso_por_defecto($tipo),
                         'observacion' => $this->faker->randomElement($conclusiones[$nivel]),
                         'fecha' => now()->subDays(random_int(1, 90))->format('Y-m-d'),
                         'creado_en' => now(),

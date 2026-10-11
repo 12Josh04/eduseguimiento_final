@@ -53,7 +53,7 @@ class UsuarioController extends Controller
         DB::table('users')->where('id',$id)->update([
             'nombre'         => $request->nombre,
             'rol_id'         => $request->rol_id,
-            'activo'         => $request->has('activo') ? 1 : 0,
+            'activo'         => $request->activo == '1' ? 1 : 0,
             'actualizado_en' => now(),
         ]);
 

@@ -12,6 +12,11 @@
     </a>
 </div>
 
+<div style="padding:.85rem 1.1rem;background:var(--primary-soft);border-radius:var(--radius);margin-bottom:1.25rem;font-size:.85rem;color:var(--primary);display:flex;align-items:center;gap:.6rem">
+    <i class="fas fa-info-circle"></i>
+    Esta pantalla es un resumen de solo consulta. La asistencia diaria la registra cada <strong>docente</strong> desde su propio panel ("Asistencias" en su menú), eligiendo el salón que le corresponde.
+</div>
+
 <div class="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1.25rem">
     <div class="card"><div class="card-body">
         <div style="font-size:1.6rem;font-weight:800;color:var(--danger)">{{ $totalFaltas }}</div>

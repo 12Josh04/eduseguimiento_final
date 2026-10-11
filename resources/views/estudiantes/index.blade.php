@@ -65,20 +65,27 @@
                 autocomplete="off"
             >
         </div>
+        <select name="nivel" class="form-control" style="min-width:150px" onchange="this.form.submit()">
+            <option value="">Todos los niveles</option>
+            <option value="Primaria" {{ request('nivel') === 'Primaria' ? 'selected' : '' }}>📘 Primaria</option>
+            <option value="Secundaria" {{ request('nivel') === 'Secundaria' ? 'selected' : '' }}>🎓 Secundaria</option>
+        </select>
         <select name="grado_id" class="form-control" style="min-width:180px" onchange="this.form.submit()">
             <option value="">Todos los grados</option>
             @include('partials.grado-options', ['grados' => $rol === 'docente' ? $grados->whereIn('id', $gradoIdsPermitidos ?? []) : $grados, 'seleccionado' => request('grado_id')])
         </select>
+        @if($rol !== 'psicologa')
         <select class="form-control" style="min-width:150px" onchange="filtrarEstado(this.value)">
             <option value="">Todos los estados</option>
             <option value="aprobado" {{ request('estado') === 'aprobado' ? 'selected' : '' }}>✓ Aprobado</option>
             <option value="riesgo" {{ request('estado') === 'riesgo' ? 'selected' : '' }}>⚠ En riesgo</option>
             <option value="desaprobado" {{ request('estado') === 'desaprobado' ? 'selected' : '' }}>✗ Desaprobado</option>
         </select>
+        @endif
         <button type="submit" class="btn btn-ghost btn-sm" style="white-space:nowrap">
             <i class="fas fa-search"></i> Buscar
         </button>
-        @if(request('search') || request('grado_id') || request('estado'))
+        @if(request('search') || request('grado_id') || request('estado') || request('nivel'))
             <a href="{{ route('estudiantes.index') }}" class="btn btn-ghost btn-sm" title="Limpiar filtros">
                 <i class="fas fa-times"></i> Limpiar
             </a>
@@ -111,10 +118,17 @@
                                 <span class="panel-stat-num">{{ $p->total_estudiantes }}</span>
                                 <span class="panel-stat-label">estudiante{{ $p->total_estudiantes == 1 ? '' : 's' }}</span>
                             </div>
+                            @if($rol !== 'psicologa')
                             <div class="panel-stat">
-                                <span class="panel-stat-num" style="color:{{ $colorProm }}">{{ $prom !== null ? number_format($prom, 1) : '—' }}</span>
+                                <span class="panel-stat-num" style="color:{{ $colorProm }}">
+                                    @if($prom === null) —
+                                    @elseif($nivel === 'Primaria') {{ nivel_logro_letra($prom) }}
+                                    @else {{ number_format($prom, 1) }}
+                                    @endif
+                                </span>
                                 <span class="panel-stat-label">promedio</span>
                             </div>
+                            @endif
                         </div>
                     </a>
                 @endforeach
@@ -171,8 +185,10 @@
                         <th>Estudiante</th>
                         <th>Código</th>
                         <th>Grado</th>
+                        @if($rol !== 'psicologa')
                         <th>Promedio</th>
                         <th>Estado</th>
+                        @endif
                         <th>Conducta</th>
                         <th>Acciones</th>
                     </tr>
@@ -195,12 +211,22 @@
                         <td style="font-family:monospace;font-size:.82rem;color:var(--n400)">
                             {{ $est->codigo ?? '—' }}
                         </td>
-                        <td><span class="tag tag-info">{{ $est->grado ?? '—' }}</span></td>
                         <td>
-                            <span class="{{ $prom>=14?'nota-alta':($prom>=11?'nota-media':'nota-baja') }}">
-                                {{ number_format($prom, 1) }}
-                            </span>
-                            <span style="color:var(--n400);font-size:.78rem"> /20</span>
+                            <span class="tag tag-info">{{ $est->grado ?? '—' }}</span>
+                            @if($est->nivel)
+                                <span class="tag" style="background:var(--n100);color:var(--n600);font-size:.68rem"><i class="fas {{ $est->nivel === 'Primaria' ? 'fa-child' : 'fa-user-graduate' }}"></i> {{ $est->nivel }}</span>
+                            @endif
+                        </td>
+                        @if($rol !== 'psicologa')
+                        <td>
+                            @if($est->nivel === 'Primaria')
+                                <span style="font-weight:700;color:{{ nivel_logro_color(nivel_logro_letra($prom)) }}">{{ nivel_logro_letra($prom) }}</span>
+                            @else
+                                <span class="{{ $prom>=14?'nota-alta':($prom>=11?'nota-media':'nota-baja') }}">
+                                    {{ number_format($prom, 1) }}
+                                </span>
+                                <span style="color:var(--n400);font-size:.78rem"> /20</span>
+                            @endif
                         </td>
                         <td>
                             @if($estado === 'aprobado')
@@ -211,6 +237,7 @@
                                 <span class="tag tag-danger">✗ Desaprobado</span>
                             @endif
                         </td>
+                        @endif
                         <td>
                             <div style="display:flex;gap:.3rem">
                                 @if($est->conductas_pos > 0)
@@ -230,10 +257,12 @@
                                    class="btn btn-ghost btn-sm btn-icon-only" title="Ver perfil">
                                     <i class="fas fa-eye"></i>
                                 </a>
+                                @if($rol !== 'psicologa')
                                 <a href="{{ route('notas.index', ['estudiante' => $est->id]) }}"
                                    class="btn btn-ghost btn-sm btn-icon-only" title="Ver notas">
                                     <i class="fas fa-clipboard-list"></i>
                                 </a>
+                                @endif
                                 @if(in_array($rol, ['promotor','docente','psicologa']))
                                     <a href="{{ route('conductas.index', ['estudiante' => $est->id]) }}"
                                        class="btn btn-ghost btn-sm btn-icon-only" title="Ver conductas">
@@ -260,7 +289,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7">
+                        <td colspan="{{ $rol !== 'psicologa' ? 7 : 5 }}">
                             <div class="empty-state" style="padding:2rem">
                                 <div class="empty-state-icon"><i class="fas fa-user-graduate"></i></div>
                                 <p>
@@ -405,6 +434,34 @@
                         @error('seccion')
                             <span class="form-error">{{ $message }}</span>
                         @enderror
+                    </div>
+                </div>
+
+                <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--n200)">
+                    <label class="form-label" style="font-weight:700;color:var(--n600)">
+                        <i class="fas fa-user-friends" style="margin-right:.3rem"></i> Apoderado (opcional, puedes agregarlo después desde la ficha)
+                    </label>
+                    <div class="grid-2" style="margin-top:.6rem">
+                        <div class="form-group">
+                            <label class="form-label">Nombre del apoderado</label>
+                            <input type="text" name="apoderado_nombre" class="form-control" maxlength="80" placeholder="Ej: María Pérez" value="{{ old('apoderado_nombre') }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Parentesco</label>
+                            <select name="apoderado_parentesco" class="form-control">
+                                <option value="padre">Padre</option>
+                                <option value="madre">Madre</option>
+                                <option value="tutor">Tutor(a)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Teléfono</label>
+                            <input type="text" name="apoderado_telefono" class="form-control" maxlength="15" placeholder="987654321" value="{{ old('apoderado_telefono') }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Correo del apoderado</label>
+                            <input type="email" name="apoderado_email" class="form-control" placeholder="apoderado@correo.com" value="{{ old('apoderado_email') }}">
+                        </div>
                     </div>
                 </div>
             </div>

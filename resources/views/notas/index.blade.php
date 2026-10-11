@@ -66,7 +66,12 @@
                                 <span class="panel-stat-label">estudiante{{ $p->total_estudiantes == 1 ? '' : 's' }}</span>
                             </div>
                             <div class="panel-stat">
-                                <span class="panel-stat-num" style="color:{{ $colorProm }}">{{ $prom !== null ? number_format($prom, 1) : '—' }}</span>
+                                <span class="panel-stat-num" style="color:{{ $colorProm }}">
+                                    @if($prom === null) —
+                                    @elseif($nivel === 'Primaria') {{ nivel_logro_letra($prom) }}
+                                    @else {{ number_format($prom, 1) }}
+                                    @endif
+                                </span>
                                 <span class="panel-stat-label">promedio</span>
                             </div>
                             <div class="panel-stat">
@@ -87,6 +92,7 @@
 
 @elseif($vista === 'cursos')
 {{-- ── Nivel 2: Cursos dictados en esta sección ─────────────────────────── --}}
+@php $nivelSeccion = optional($grados->firstWhere('id', request('grado_id')))->nivel; @endphp
 <div class="paneles-grid">
     @forelse($cursosSeccion as $c)
         <a href="{{ route('notas.curso', ['curso' => $c->curso_id, 'grado_id' => request('grado_id'), 'seccion' => request('seccion')]) }}" class="panel-grado">
@@ -108,7 +114,10 @@
                 </div>
                 <div class="panel-stat">
                     <span class="panel-stat-num" style="color:{{ $c->promedio === null ? 'var(--n400)' : ($c->promedio >= 14 ? 'var(--success)' : ($c->promedio >= 11 ? 'var(--warning)' : 'var(--danger)')) }}">
-                        {{ $c->promedio !== null ? number_format($c->promedio,1) : '—' }}
+                        @if($c->promedio === null) —
+                        @elseif($nivelSeccion === 'Primaria') {{ nivel_logro_letra($c->promedio) }}
+                        @else {{ number_format($c->promedio,1) }}
+                        @endif
                     </span>
                     <span class="panel-stat-label">promedio</span>
                 </div>
@@ -142,7 +151,7 @@
 <div class="filter-bar">
     <div class="search-bar">
         <i class="fas fa-search"></i>
-        <input type="text" class="form-control" id="tableSearch" placeholder="Buscar estudiante...">
+        <input type="text" class="form-control" id="tableSearch" placeholder="{{ $rol === 'estudiante' ? 'Buscar evaluación...' : 'Buscar estudiante...' }}">
     </div>
 
     <select class="form-control" style="min-width:160px" id="filtroCurso">
@@ -233,11 +242,17 @@
                             {{ Str::limit($n->nombre_evaluacion, 40) }}
                         </td>
                         <td>
-                            <span class="nota-val {{ $n->nota>=14 ? 'nota-alta' : ($n->nota>=11 ? 'nota-media' : 'nota-baja') }}"
-                                  style="font-size:1rem;font-weight:700">
-                                {{ number_format($n->nota, 1) }}
-                            </span>
-                            <span style="color:var(--n400);font-size:.78rem"> /{{ $n->nota_maxima }}</span>
+                            @if($n->nota_letra)
+                                <span class="nota-val" style="font-size:1rem;font-weight:700;color:{{ nivel_logro_color($n->nota_letra) }}">
+                                    {{ $n->nota_letra }}
+                                </span>
+                            @else
+                                <span class="nota-val {{ $n->nota>=14 ? 'nota-alta' : ($n->nota>=11 ? 'nota-media' : 'nota-baja') }}"
+                                      style="font-size:1rem;font-weight:700">
+                                    {{ number_format($n->nota, 1) }}
+                                </span>
+                                <span style="color:var(--n400);font-size:.78rem"> /{{ $n->nota_maxima }}</span>
+                            @endif
                         </td>
                         <td>
                             <div style="display:flex;align-items:center;gap:.4rem">
@@ -358,10 +373,10 @@
                 <div class="form-row cols-2">
                     <div class="form-group">
                         <label class="form-label">Tipo de Evaluación *</label>
-                        <select name="tipo_evaluacion" class="form-control" required>
-                            <option value="examen">Examen</option>
-                            <option value="tarea">Tarea</option>
-                            <option value="practica">Práctica calificada</option>
+                        <select name="tipo_evaluacion" class="form-control" required onchange="sugerirPeso(this, 'pesoNota')">
+                            <option value="examen" data-peso="2">Examen</option>
+                            <option value="tarea" data-peso="1" selected>Tarea</option>
+                            <option value="practica" data-peso="1.5">Práctica calificada</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -378,16 +393,37 @@
                 </div>
 
                 <div class="form-row cols-2">
-                    <div class="form-group">
+                    <div class="form-group" id="grupoNotaNumero">
                         <label class="form-label">Nota Obtenida *</label>
-                        <input type="number" name="nota" class="form-control"
+                        <input type="number" name="nota" id="inputNotaNumero" class="form-control"
                                min="0" max="20" step="0.5" placeholder="0 — 20" required>
+                    </div>
+                    <div class="form-group" id="grupoNotaLetra" style="display:none">
+                        <label class="form-label">Nivel de Logro *</label>
+                        <select name="nota_letra" id="inputNotaLetra" class="form-control">
+                            <option value="">— Seleccionar —</option>
+                            <option value="AD">AD — Logro destacado</option>
+                            <option value="A">A — Logro esperado</option>
+                            <option value="B">B — En proceso</option>
+                            <option value="C">C — En inicio</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Nota Máxima</label>
                         <input type="number" name="nota_maxima" class="form-control"
                                value="20" min="1" max="100">
                     </div>
+                </div>
+                <p id="avisoPrimaria" style="display:none;font-size:.78rem;color:var(--n500);margin-top:-.6rem;margin-bottom:.8rem">
+                    <i class="fas fa-info-circle"></i> Este grado es de Primaria: la calificación se registra directamente en Nivel de Logro (AD/A/B/C).
+                </p>
+
+                <div class="form-group">
+                    <label class="form-label">Peso de esta evaluación</label>
+                    <input type="number" name="peso" id="pesoNota" class="form-control" value="1" min="0.1" max="10" step="0.1">
+                    <p style="font-size:.78rem;color:var(--n400);margin-top:.3rem">
+                        Define cuánto cuenta esta nota frente a las demás del mismo bimestre. Por defecto: examen = 2, práctica = 1.5, tarea = 1.
+                    </p>
                 </div>
             </div>
 
@@ -423,6 +459,13 @@
 
 @push('scripts')
 <script>
+// ── Sugerir peso según el tipo de evaluación elegido ─────────────────────
+function sugerirPeso(select, inputId) {
+    const opt = select.options[select.selectedIndex];
+    const peso = opt.dataset.peso;
+    if (peso) document.getElementById(inputId).value = peso;
+}
+
 // ── Filtros de tabla ────────────────────────────────────────────────────
 function aplicarFiltros() {
     const curso   = document.getElementById('filtroCurso')?.value   ?? '';
@@ -455,12 +498,24 @@ document.getElementById('btnLimpiar')?.addEventListener('click', function () {
     document.querySelectorAll('#tablaNotas tbody tr').forEach(r => r.style.display = '');
 });
 
+// ── Alternar Nota numérica (Secundaria) / Nivel de Logro en letras (Primaria) ──
+function actualizarTipoNota(gradoSelect) {
+    const opt = gradoSelect.options[gradoSelect.selectedIndex];
+    const esPrimaria = !!opt && opt.dataset.nivel === 'Primaria';
+    document.getElementById('grupoNotaNumero').style.display = esPrimaria ? 'none' : '';
+    document.getElementById('grupoNotaLetra').style.display = esPrimaria ? '' : 'none';
+    document.getElementById('avisoPrimaria').style.display = esPrimaria ? '' : 'none';
+    document.getElementById('inputNotaNumero').required = !esPrimaria;
+    document.getElementById('inputNotaLetra').required = esPrimaria;
+}
+
 // ── AJAX: cargar alumnos al seleccionar grado ────────────────────────────
 const selectGrado      = document.getElementById('selectGrado');
 const selectEstudiante = document.getElementById('selectEstudiante');
 
 if (selectGrado && selectEstudiante) {
     selectGrado.addEventListener('change', function () {
+        actualizarTipoNota(this);
         const gradoId = this.value;
 
         selectEstudiante.innerHTML = '<option value="">— Cargando... —</option>';

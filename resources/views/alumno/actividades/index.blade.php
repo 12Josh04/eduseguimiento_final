@@ -28,7 +28,11 @@
             </div>
             <div style="display:flex;align-items:center;gap:.75rem">
                 @if($it->estado === 'calificado')
-                    <span style="font-weight:800;font-size:1.1rem;color:{{ $it->nota>=14?'var(--success)':($it->nota>=11?'var(--warning)':'var(--danger)') }}">{{ number_format($it->nota,1) }}</span>
+                    @if($it->nota_letra)
+                        <span style="font-weight:800;font-size:1.1rem;color:{{ nivel_logro_color($it->nota_letra) }}">{{ $it->nota_letra }}</span>
+                    @else
+                        <span style="font-weight:800;font-size:1.1rem;color:{{ $it->nota>=14?'var(--success)':($it->nota>=11?'var(--warning)':'var(--danger)') }}">{{ number_format($it->nota,1) }}</span>
+                    @endif
                     <span class="tag tag-success">Calificado</span>
                 @elseif($it->estado === 'entregado')
                     <span class="tag tag-warning"><i class="fas fa-inbox"></i> Entregado</span>

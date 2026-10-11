@@ -33,13 +33,20 @@ class ConstanciaController extends Controller
         ];
     }
 
-    /** Restringe el acceso: promotor/docente ven cualquier estudiante; el propio estudiante solo se ve a sí mismo. */
+    /**
+     * Las constancias son documentos administrativos oficiales: su emisión es exclusiva
+     * del promotor. El propio estudiante puede emitir únicamente las suyas. El docente y
+     * la psicóloga no tienen acceso (ya excluidos por el middleware de las rutas), pero se
+     * valida aquí también por si se llega a esta lógica desde otro punto de entrada.
+     */
     private function verificarAcceso(string $id, $estudiante): void
     {
         $rol = session('user_rol');
         if ($rol === 'estudiante') {
             $propio = DB::table('estudiantes')->where('usuario_id', session('user_id'))->value('id');
             abort_if($propio !== $id, 403, 'No tienes permiso para descargar la constancia de otro estudiante.');
+        } elseif ($rol !== 'promotor') {
+            abort(403, 'La emisión de constancias es exclusiva del promotor.');
         }
     }
 

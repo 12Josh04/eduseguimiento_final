@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Pagination\Paginator;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -11,6 +12,10 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Vista de paginación propia (íconos Font Awesome, acorde al diseño del sistema).
+        Paginator::defaultView('vendor.pagination.custom');
+        Paginator::defaultSimpleView('vendor.pagination.custom');
+
         // Directivas @auth/@guest basadas en sesión propia (no Breeze/Eloquent)
         Blade::directive('auth', function () {
             return "<?php if(session('user_id')): ?>";

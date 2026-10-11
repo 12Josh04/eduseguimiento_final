@@ -85,7 +85,13 @@
                 @php $promGeneral = $gradebook->pluck('promedio_final')->filter(fn($v)=>$v!==null); @endphp
                 <div style="text-align:center;padding:.75rem 1.1rem;background:var(--success-soft);border-radius:10px">
                     <div style="font-size:1.5rem;font-weight:800;color:{{ $promGeneral->avg() >= 14 ? 'var(--success)' : ($promGeneral->avg() >= 11 ? 'var(--warning)' : 'var(--danger)') }}">
-                        {{ $promGeneral->count() ? number_format($promGeneral->avg(),1) : '—' }}
+                        @if(!$promGeneral->count())
+                            —
+                        @elseif($grado->nivel === 'Primaria')
+                            {{ nivel_logro_letra($promGeneral->avg()) }}
+                        @else
+                            {{ number_format($promGeneral->avg(),1) }}
+                        @endif
                     </div>
                     <div style="font-size:.7rem;color:var(--n400);font-weight:600">PROMEDIO SECCIÓN</div>
                 </div>
@@ -173,7 +179,11 @@
                             @php $b = $est->bimestres[$p->id] ?? null; @endphp
                             <td style="text-align:center">
                                 @if($b !== null)
-                                    <span class="{{ $b>=14?'nota-alta':($b>=11?'nota-media':'nota-baja') }}" style="font-weight:700">{{ number_format($b,1) }}</span>
+                                    @if($grado->nivel === 'Primaria')
+                                        <span style="font-weight:700;color:{{ nivel_logro_color(nivel_logro_letra($b)) }}">{{ nivel_logro_letra($b) }}</span>
+                                    @else
+                                        <span class="{{ $b>=14?'nota-alta':($b>=11?'nota-media':'nota-baja') }}" style="font-weight:700">{{ number_format($b,1) }}</span>
+                                    @endif
                                 @else
                                     <span style="color:var(--n400)">—</span>
                                 @endif
@@ -181,7 +191,11 @@
                         @endforeach
                         <td style="text-align:center">
                             @if($est->promedio_final !== null)
-                                <span class="{{ $est->promedio_final>=14?'nota-alta':($est->promedio_final>=11?'nota-media':'nota-baja') }}" style="font-weight:800;font-size:1rem">{{ number_format($est->promedio_final,1) }}</span>
+                                @if($grado->nivel === 'Primaria')
+                                    <span style="font-weight:800;font-size:1rem;color:{{ nivel_logro_color(nivel_logro_letra($est->promedio_final)) }}">{{ nivel_logro_letra($est->promedio_final) }}</span>
+                                @else
+                                    <span class="{{ $est->promedio_final>=14?'nota-alta':($est->promedio_final>=11?'nota-media':'nota-baja') }}" style="font-weight:800;font-size:1rem">{{ number_format($est->promedio_final,1) }}</span>
+                                @endif
                             @else
                                 <span style="color:var(--n400)">—</span>
                             @endif
@@ -196,6 +210,77 @@
         </div>
     </div>
 </div>
+
+{{-- ── Llenado de Libreta: Nivel de Logro y conclusión descriptiva, a mano por el docente ──── --}}
+@if(in_array($rol, ['promotor','docente']))
+<div class="card" style="margin-top:1rem">
+    <div class="card-header">
+        <div class="card-title"><i class="fas fa-file-signature"></i> Llenado de Libreta (Nivel de Logro)</div>
+        <span style="font-size:.78rem;color:var(--n500)">Estos son los mismos recuadros que verá el estudiante en su libreta oficial</span>
+    </div>
+    <div class="card-body" style="padding:0">
+        <div class="table-wrapper">
+            <table class="tabla-libreta">
+                <thead>
+                    <tr>
+                        <th style="min-width:160px">Estudiante</th>
+                        @foreach($periodos as $p)<th style="text-align:center;min-width:180px">{{ $p->nombre }}</th>@endforeach
+                        <th style="width:80px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($gradebook as $est)
+                    @php $formId = 'lib-'.$est->id; @endphp
+                    <tr>
+                        <td>
+                            <div class="student-cell">
+                                <div class="avatar">{{ strtoupper(substr($est->nombre,0,1)) }}</div>
+                                <span style="font-weight:500;font-size:.85rem">{{ $est->nombre }}</span>
+                            </div>
+                        </td>
+                        @foreach($periodos as $p)
+                            @php $l = $est->libreta[$p->id]; @endphp
+                            <td>
+                                <div style="display:flex;gap:.35rem;align-items:flex-start">
+                                    <select form="{{ $formId }}" name="periodos[{{ $p->id }}][nivel_logro]" class="form-control nl-select {{ $l['nivel_logro'] ? 'nl-'.$l['nivel_logro'] : '' }}" style="width:66px;flex:none;font-weight:800;text-align:center" onchange="this.className='form-control nl-select'+(this.value?' nl-'+this.value:'')">
+                                        <option value="">—</option>
+                                        <option value="AD" {{ $l['nivel_logro']==='AD'?'selected':'' }}>AD</option>
+                                        <option value="A" {{ $l['nivel_logro']==='A'?'selected':'' }}>A</option>
+                                        <option value="B" {{ $l['nivel_logro']==='B'?'selected':'' }}>B</option>
+                                        <option value="C" {{ $l['nivel_logro']==='C'?'selected':'' }}>C</option>
+                                    </select>
+                                    <input form="{{ $formId }}" type="text" name="periodos[{{ $p->id }}][conclusion]" class="form-control" style="font-size:.78rem"
+                                           value="{{ $l['conclusion'] }}"
+                                           placeholder="{{ $l['sugerido'] ? 'Sugerido: '.$l['sugerido'] : 'Conclusión descriptiva...' }}">
+                                </div>
+                            </td>
+                        @endforeach
+                        <td style="text-align:center">
+                            <form id="{{ $formId }}" action="{{ route('notas.libreta.store', $curso->id) }}" method="POST">
+                                @csrf
+                                <input type="hidden" name="estudiante_id" value="{{ $est->id }}">
+                                <button type="submit" class="btn btn-primary btn-sm btn-icon-only" title="Guardar libreta de este estudiante">
+                                    <i class="fas fa-save"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    @empty
+                    <tr><td colspan="{{ 2 + count($periodos) }}"><div class="empty-state" style="padding:2rem"><p>No hay estudiantes matriculados en esta sección.</p></div></td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<style>
+    .tabla-libreta td{vertical-align:top;padding-top:.6rem}
+    .nl-select.nl-AD{color:#2e7d32;border-color:#2e7d32}
+    .nl-select.nl-A{color:#1565c0;border-color:#1565c0}
+    .nl-select.nl-B{color:#e08a00;border-color:#e08a00}
+    .nl-select.nl-C{color:#c62828;border-color:#c62828}
+</style>
+@endif
 
 {{-- Modal nueva clase --}}
 @if(in_array($rol, ['promotor','docente']))
@@ -263,10 +348,10 @@
                 <div class="form-row cols-2">
                     <div class="form-group">
                         <label class="form-label">Tipo *</label>
-                        <select name="tipo_evaluacion" class="form-control" required>
-                            <option value="tarea">Tarea</option>
-                            <option value="practica">Práctica calificada</option>
-                            <option value="examen">Examen</option>
+                        <select name="tipo_evaluacion" class="form-control" required onchange="sugerirPeso(this, 'pesoActividad')">
+                            <option value="tarea" data-peso="1" selected>Tarea</option>
+                            <option value="practica" data-peso="1.5">Práctica calificada</option>
+                            <option value="examen" data-peso="2">Examen</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -276,9 +361,15 @@
                         </select>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Fecha de entrega</label>
-                    <input type="date" name="fecha_entrega" class="form-control" value="{{ now()->addDays(7)->format('Y-m-d') }}">
+                <div class="form-row cols-2">
+                    <div class="form-group">
+                        <label class="form-label">Fecha de entrega</label>
+                        <input type="date" name="fecha_entrega" class="form-control" value="{{ now()->addDays(7)->format('Y-m-d') }}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Peso de la actividad</label>
+                        <input type="number" name="peso" id="pesoActividad" class="form-control" value="1" min="0.1" max="10" step="0.1">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Archivo de indicaciones (opcional)</label>
@@ -300,3 +391,12 @@
 @endif
 
 @endsection
+
+@push('scripts')
+<script>
+function sugerirPeso(select, inputId) {
+    const opt = select.options[select.selectedIndex];
+    if (opt.dataset.peso) document.getElementById(inputId).value = opt.dataset.peso;
+}
+</script>
+@endpush

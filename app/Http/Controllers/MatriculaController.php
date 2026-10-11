@@ -116,36 +116,61 @@ class MatriculaController extends Controller
             return back()->with('error', 'Esta solicitud ya fue confirmada anteriormente.');
         }
 
-        $passwordTemporal = Str::upper(Str::random(4)) . random_int(100, 999);
+        // Si el DNI coincide con un estudiante YA REGISTRADO pero con la cuenta desactivada
+        // (por ejemplo, por la política de fin de año sin matrícula), se reactiva esa misma
+        // cuenta en vez de crear un duplicado, preservando su historial académico y
+        // conductual. Solo aplica si el estudiante encontrado está inactivo: un DNI de un
+        // estudiante actualmente activo no debe fusionarse (podría ser un error de tipeo).
+        $existente = $solicitud->dni
+            ? DB::table('estudiantes')->where('dni', $solicitud->dni)->where('activo', 0)->first()
+            : null;
 
-        $userId = (string) Str::uuid();
-        $email = $solicitud->apoderado_email ?: ('estudiante.' . strtolower(Str::random(6)) . '@eduseguimiento.com');
-        DB::table('users')->insert([
-            'id' => $userId,
-            'nombre' => $solicitud->nombre . ' ' . $solicitud->apellido,
-            'email' => $email,
-            'password_hash' => Hash::make($passwordTemporal),
-            'rol_id' => 4,
-            'activo' => 1,
-            'creado_en' => now(),
-            'actualizado_en' => now(),
-        ]);
+        if ($existente) {
+            $estId = $existente->id;
+            $codigo = $existente->codigo;
 
-        $estId = (string) Str::uuid();
-        $codigo = 'EST' . str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT);
-        DB::table('estudiantes')->insert([
-            'id' => $estId,
-            'usuario_id' => $userId,
-            'nombre' => $solicitud->nombre,
-            'apellido' => $solicitud->apellido,
-            'codigo' => $codigo,
-            'fecha_nacimiento' => $solicitud->fecha_nacimiento,
-            'dni' => $solicitud->dni,
-            'telefono' => $solicitud->apoderado_telefono,
-            'activo' => 1,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+            DB::table('estudiantes')->where('id', $estId)->update([
+                'activo' => 1,
+                'telefono' => $solicitud->apoderado_telefono,
+                'updated_at' => now(),
+            ]);
+            if ($existente->usuario_id) {
+                DB::table('users')->where('id', $existente->usuario_id)->update(['activo' => 1, 'actualizado_en' => now()]);
+            }
+            $email = DB::table('users')->where('id', $existente->usuario_id)->value('email') ?? '—';
+            $passwordTemporal = null;
+        } else {
+            $passwordTemporal = Str::upper(Str::random(4)) . random_int(100, 999);
+
+            $userId = (string) Str::uuid();
+            $email = $solicitud->apoderado_email ?: ('estudiante.' . strtolower(Str::random(6)) . '@eduseguimiento.com');
+            DB::table('users')->insert([
+                'id' => $userId,
+                'nombre' => $solicitud->nombre . ' ' . $solicitud->apellido,
+                'email' => $email,
+                'password_hash' => Hash::make($passwordTemporal),
+                'rol_id' => 4,
+                'activo' => 1,
+                'creado_en' => now(),
+                'actualizado_en' => now(),
+            ]);
+
+            $estId = (string) Str::uuid();
+            $codigo = 'EST' . str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT);
+            DB::table('estudiantes')->insert([
+                'id' => $estId,
+                'usuario_id' => $userId,
+                'nombre' => $solicitud->nombre,
+                'apellido' => $solicitud->apellido,
+                'codigo' => $codigo,
+                'fecha_nacimiento' => $solicitud->fecha_nacimiento,
+                'dni' => $solicitud->dni,
+                'telefono' => $solicitud->apoderado_telefono,
+                'activo' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         if ($solicitud->grado_id) {
             DB::table('matriculas')->insert([
@@ -155,6 +180,7 @@ class MatriculaController extends Controller
                 'seccion' => null,
                 'anio_escolar' => now()->year,
                 'activo' => 1,
+                'libreta_habilitada' => true,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -181,7 +207,9 @@ class MatriculaController extends Controller
 
         registrar_auditoria('matricula_confirmada', 'matricula', null, $codigo);
 
-        return back()->with('success', "Matrícula confirmada. Código del estudiante: {$codigo} · Correo: {$email} · Contraseña temporal: {$passwordTemporal}. Compártela con el apoderado y pídele cambiarla en \"Mi cuenta\".");
+        return back()->with('success', $existente
+            ? "Matrícula confirmada. Se reactivó la cuenta existente del estudiante (código {$codigo}, correo {$email}), preservando su historial."
+            : "Matrícula confirmada. Código del estudiante: {$codigo} · Correo: {$email} · Contraseña temporal: {$passwordTemporal}. Compártela con el apoderado y pídele cambiarla en \"Mi cuenta\".");
     }
 
     /** Rechaza una solicitud de matrícula (por ejemplo, voucher inválido). */

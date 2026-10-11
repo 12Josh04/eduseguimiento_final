@@ -48,10 +48,17 @@ Route::middleware(['auth.session'])->group(function () {
             Route::resource('estudiantes', EstudianteController::class);
         });
 
-        // ── Notas — consulta (Promotor, Docente, Psicóloga) ─────────────
-        Route::middleware('auth.session:promotor,docente,psicologa')->group(function () {
+        // ── Apoderados — solo Promotor ───────────────────────────────────
+        Route::middleware('auth.session:promotor')->group(function () {
+            Route::post('/estudiantes/{id}/apoderados', [EstudianteController::class, 'storeApoderado'])->name('apoderados.store');
+            Route::delete('/apoderados/{id}', [EstudianteController::class, 'destroyApoderado'])->name('apoderados.destroy');
+            Route::post('/estudiantes/{id}/libreta/toggle', [EstudianteController::class, 'toggleLibreta'])->name('estudiantes.libreta.toggle');
+        });
+
+        // ── Notas — consulta (Promotor, Docente). La Psicóloga no tiene acceso a notas,
+        // solo a conducta y sesiones de psicología. ────────────────────────────────
+        Route::middleware('auth.session:promotor,docente')->group(function () {
             Route::get('/notas', [NotaController::class, 'index'])->name('notas.index');
-            Route::get('/notas/promedios', [NotaController::class, 'promedios'])->name('notas.promedios');
             Route::get('/notas/cursos/{curso}', [NotaController::class, 'curso'])->name('notas.curso');
             Route::get('/notas/estudiantes/{estudiante}/cursos', [NotaController::class, 'estudianteCursos'])->name('notas.estudiante.cursos');
             Route::get('/notas/actividades/{id}', [ActividadController::class, 'show'])->name('actividades.show');
@@ -66,6 +73,14 @@ Route::middleware(['auth.session'])->group(function () {
             Route::post('/notas/cursos/{curso}/actividades', [ActividadController::class, 'store'])->name('actividades.store');
             Route::post('/notas/actividades/{id}/calificar/{estudiante}', [ActividadController::class, 'calificar'])->name('actividades.calificar');
             Route::delete('/notas/actividades/{id}', [ActividadController::class, 'destroy'])->name('actividades.destroy');
+            Route::post('/notas/cursos/{curso}/libreta', [NotaController::class, 'storeLibreta'])->name('notas.libreta.store');
+        });
+
+        // ── Notas — Promedios institucionales, Orden de Mérito y Comparativo Secciones:
+        // consolidan el rendimiento de TODOS los cursos de un alumno/sección, por lo que
+        // son exclusivos del promotor (un docente solo debe ver sus propios cursos). ────
+        Route::middleware('auth.session:promotor')->group(function () {
+            Route::get('/notas/promedios', [NotaController::class, 'promedios'])->name('notas.promedios');
         });
 
         // ── Actividades — archivos (Promotor, Docente, Estudiante) ──────
@@ -164,6 +179,11 @@ Route::middleware(['auth.session'])->group(function () {
 
     Route::middleware('auth.session:promotor,docente')->group(function () {
         Route::get('/reportes/asistencia', [ReporteController::class, 'asistencia'])->name('reportes.asistencia');
+    });
+
+    // Orden de Mérito y Comparativo Secciones consolidan el rendimiento de TODOS los
+    // cursos y secciones de un grado: son vistas institucionales, exclusivas del promotor.
+    Route::middleware('auth.session:promotor')->group(function () {
         Route::get('/reportes/academico', [ReporteController::class, 'academico'])->name('reportes.academico');
         Route::get('/reportes/orden-merito', [ReporteController::class, 'ordenMerito'])->name('reportes.ordenMerito');
         Route::get('/reportes/comparativo-secciones', [ReporteController::class, 'comparativoSecciones'])->name('reportes.comparativoSecciones');
@@ -180,11 +200,15 @@ Route::middleware(['auth.session'])->group(function () {
         Route::post('/{id}/rechazar', [MatriculaController::class, 'rechazar'])->name('rechazar');
     });
 
-    Route::middleware('auth.session:promotor,docente,estudiante')->group(function () {
+    // La libreta consolida las notas de TODOS los cursos del alumno; el docente solo debe
+    // ver el rendimiento en su propio curso, por lo que no tiene acceso a esta vista.
+    Route::middleware('auth.session:promotor,estudiante')->group(function () {
         Route::get('/boletas/{id}', [BoletaController::class, 'show'])->name('boletas.show');
     });
 
-    Route::middleware('auth.session:promotor,docente,estudiante')->prefix('constancias')->name('constancias.')->group(function () {
+    // Las constancias son documentos administrativos: emisión exclusiva del promotor
+    // (o del propio estudiante, para las suyas). El docente no tiene acceso.
+    Route::middleware('auth.session:promotor,estudiante')->prefix('constancias')->name('constancias.')->group(function () {
         Route::get('/{id}/estudios', [ConstanciaController::class, 'estudios'])->name('estudios');
         Route::get('/{id}/matricula', [ConstanciaController::class, 'matricula'])->name('matricula');
         Route::get('/{id}/conducta', [ConstanciaController::class, 'conducta'])->name('conducta');

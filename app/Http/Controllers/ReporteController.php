@@ -9,11 +9,26 @@ class ReporteController extends Controller
 {
     public function asistencia()
     {
-        $porMes = DB::table('asistencias')
-            ->select(DB::raw('DATE_FORMAT(fecha, "%Y-%m") as mes'), DB::raw('COUNT(*) as total'))
-            ->groupBy('mes')
-            ->orderBy('mes')
-            ->get();
+        $rol = session('user_rol');
+
+        $query = DB::table('asistencias as a')->select(DB::raw('DATE_FORMAT(a.fecha, "%Y-%m") as mes'), DB::raw('COUNT(*) as total'));
+
+        // Un docente solo debe ver la asistencia de los alumnos de sus propios grados
+        // asignados, no el consolidado de todo el colegio.
+        if ($rol === 'docente') {
+            $gradoIds = DB::table('asignaciones_docente')
+                ->where('docente_id', session('user_id'))->where('activo', 1)->where('anio_escolar', date('Y'))
+                ->pluck('grado_id')->unique()->values()->all() ?: ['__ninguno__'];
+
+            $query->whereExists(function ($q) use ($gradoIds) {
+                $q->select(DB::raw(1))->from('matriculas as m')
+                    ->whereColumn('m.estudiante_id', 'a.estudiante_id')
+                    ->where('m.activo', 1)->where('m.anio_escolar', date('Y'))
+                    ->whereIn('m.grado_id', $gradoIds);
+            });
+        }
+
+        $porMes = $query->groupBy('mes')->orderBy('mes')->get();
 
         return view('reportes.asistencia', compact('porMes'));
     }
@@ -22,7 +37,7 @@ class ReporteController extends Controller
     {
         $promedios = DB::table('notas as n')
             ->join('cursos as c', 'c.id', '=', 'n.curso_id')
-            ->select('c.nombre', DB::raw('ROUND(AVG(n.nota), 1) as promedio'))
+            ->select('c.nombre', DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0), 1) as promedio'))
             ->groupBy('c.id', 'c.nombre')
             ->get();
 
@@ -63,11 +78,11 @@ class ReporteController extends Controller
                     'e.id',
                     DB::raw("CONCAT(e.apellido, ' ', e.nombre) as nombre"),
                     'e.codigo',
-                    DB::raw('ROUND(AVG(n.nota),2) as promedio'),
+                    DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),2) as promedio'),
                     DB::raw('(SELECT COUNT(*) FROM conductas c WHERE c.estudiante_id = e.id AND c.tipo = "negativo") as conductas_neg')
                 )
                 ->groupBy('e.id', 'e.apellido', 'e.nombre', 'e.codigo')
-                ->orderByDesc('promedio')
+                ->orderByDesc('promedio')->orderBy('e.apellido')->orderBy('e.nombre')
                 ->get()
                 ->values()
                 ->map(function ($row, $i) {
@@ -119,7 +134,7 @@ class ReporteController extends Controller
                 ->select(
                     's.nombre as seccion',
                     DB::raw('COUNT(DISTINCT m.estudiante_id) as total_estudiantes'),
-                    DB::raw('ROUND(AVG(n.nota),2) as promedio'),
+                    DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),2) as promedio'),
                     DB::raw('SUM(CASE WHEN n.nota >= 14 THEN 1 ELSE 0 END) as notas_aprobadas'),
                     DB::raw('COUNT(n.id) as total_notas'),
                     DB::raw('(SELECT COUNT(*) FROM conductas c JOIN matriculas m2 ON m2.estudiante_id = c.estudiante_id

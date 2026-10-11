@@ -10,6 +10,18 @@ class BoletaController extends Controller
 {
     public function show($id, \Illuminate\Http\Request $request)
     {
+        // El promotor puede autorizar o no, por alumno y año de matrícula, que el propio
+        // estudiante vea su Libreta de Notas. Promotor y docente (cuando corresponda)
+        // siempre pueden consultarla; la restricción solo aplica a la sesión del alumno.
+        if (session('user_rol') === 'estudiante') {
+            $habilitada = DB::table('matriculas')
+                ->where('estudiante_id', $id)->where('activo', 1)
+                ->value('libreta_habilitada');
+            if (!$habilitada) {
+                return view('boletas.no-habilitada');
+            }
+        }
+
         $data = $this->construirLibreta($id);
 
         if ($request->boolean('pdf')) {
@@ -42,29 +54,54 @@ class BoletaController extends Controller
         $notas = DB::table('notas as n')
             ->join('cursos as c', 'c.id', '=', 'n.curso_id')
             ->where('n.estudiante_id', $id)
-            ->select('c.nombre as curso', 'c.area_curricular', 'n.periodo_id', 'n.nota', 'n.observacion')
+            ->select('c.id as curso_id', 'c.nombre as curso', 'c.area_curricular', 'n.periodo_id', 'n.nota', 'n.peso', 'n.observacion')
             ->get();
 
-        // Agrupar por área curricular > curso, con el promedio y la conclusión descriptiva de cada bimestre
+        // Llenado manual de la libreta (Nivel de Logro y conclusión que el docente escribe a mano
+        // desde el curso): tiene prioridad sobre el cálculo automático a partir de las evaluaciones.
+        $libretaManual = DB::table('libreta_notas')
+            ->where('estudiante_id', $id)
+            ->get()
+            ->groupBy('curso_id');
+
+        // Agrupar por área curricular > curso, con el nivel de logro y la conclusión descriptiva de
+        // cada bimestre. El promedio final de cada curso es la media de sus bimestres (no un promedio
+        // de todas las evaluaciones mezcladas), para que sea coherente con los bimestres mostrados.
         $areas = [];
+        $promediosCursoParaGeneral = [];
         foreach ($notas->groupBy('area_curricular') as $areaNombre => $notasArea) {
             $cursosArea = [];
             foreach ($notasArea->groupBy('curso') as $cursoNombre => $notasCurso) {
+                $cursoId = $notasCurso->first()->curso_id;
+                $manualCurso = $libretaManual->get($cursoId, collect())->keyBy('periodo_id');
+
                 $bimestres = [];
+                $ultimoNl = null;
                 foreach ($periodos as $periodo) {
+                    $manual = $manualCurso->get($periodo->id);
                     $notasBimestre = $notasCurso->where('periodo_id', $periodo->id);
-                    if ($notasBimestre->isEmpty()) {
-                        $bimestres[$periodo->id] = ['nl' => null, 'conclusion' => null];
-                        continue;
+                    $promedio = $notasBimestre->isNotEmpty() ? promedio_ponderado($notasBimestre) : null;
+
+                    if ($manual && ($manual->nivel_logro || $manual->conclusion)) {
+                        $nl = $manual->nivel_logro;
+                        $conclusion = $manual->conclusion;
+                    } else {
+                        $nl = $promedio !== null ? nivel_logro_letra($promedio) : null;
+                        $conclusion = $notasBimestre->isNotEmpty() ? $notasBimestre->last()->observacion : null;
                     }
-                    $promedio = round($notasBimestre->avg('nota'), 1);
-                    $nl = nivel_logro_letra($promedio);
-                    $conclusion = $notasBimestre->last()->observacion;
+
+                    if ($nl) $ultimoNl = $nl;
                     $bimestres[$periodo->id] = ['nl' => $nl, 'conclusion' => $conclusion, 'promedio' => $promedio];
                 }
 
-                $todasLasNotas = $notasCurso->pluck('nota');
-                $nlFinal = $todasLasNotas->isNotEmpty() ? nivel_logro_letra(round($todasLasNotas->avg(), 1)) : null;
+                // NL final del curso: el del último bimestre evaluado (situación más reciente),
+                // igual que en la libreta impresa; el promedio numérico general sigue siendo el
+                // cálculo automático de las evaluaciones registradas.
+                $nlFinal = $ultimoNl;
+                $promediosBimestre = array_filter(array_column($bimestres, 'promedio'), fn ($v) => $v !== null);
+                if ($promediosBimestre) {
+                    $promediosCursoParaGeneral[] = round(array_sum($promediosBimestre) / count($promediosBimestre), 1);
+                }
 
                 $cursosArea[] = [
                     'nombre' => $cursoNombre,
@@ -75,7 +112,7 @@ class BoletaController extends Controller
             $areas[$areaNombre ?: 'Otras áreas'] = $cursosArea;
         }
 
-        $promedioGeneral = $notas->count() ? round($notas->avg('nota'), 1) : null;
+        $promedioGeneral = $promediosCursoParaGeneral ? round(array_sum($promediosCursoParaGeneral) / count($promediosCursoParaGeneral), 1) : null;
         $nlGeneral = nivel_logro_letra($promedioGeneral);
 
         // Asistencia por bimestre
@@ -92,6 +129,28 @@ class BoletaController extends Controller
                 'inasistencias_injustificadas' => $registros->where('estado', 'falta')->count(),
                 'tardanzas_justificadas' => 0,
                 'tardanzas_injustificadas' => $registros->where('estado', 'tardanza')->count(),
+            ];
+        }
+
+        // Conducta por bimestre: además de las notas académicas, la libreta refleja el
+        // comportamiento del estudiante en cada bimestre (parte del reporte del docente/tutor).
+        $conductaPorBimestre = [];
+        foreach ($periodos as $periodo) {
+            $registros = DB::table('conductas')
+                ->where('estudiante_id', $id)
+                ->whereBetween('fecha_hora', [$periodo->fecha_inicio, $periodo->fecha_fin . ' 23:59:59'])
+                ->get();
+
+            $positivas = $registros->where('tipo', 'positivo')->count();
+            $negativas = $registros->where('tipo', 'negativo')->count();
+            $observaciones = $registros->where('tipo', 'observacion')->count();
+
+            $conductaPorBimestre[] = [
+                'periodo' => $periodo->nombre,
+                'positivas' => $positivas,
+                'negativas' => $negativas,
+                'observaciones' => $observaciones,
+                'nl' => $negativas === 0 ? 'AD' : ($negativas === 1 ? 'A' : ($negativas <= 3 ? 'B' : 'C')),
             ];
         }
 
@@ -112,6 +171,7 @@ class BoletaController extends Controller
             'promedioGeneral' => $promedioGeneral,
             'nlGeneral' => $nlGeneral,
             'asistenciaPorBimestre' => $asistenciaPorBimestre,
+            'conductaPorBimestre' => $conductaPorBimestre,
             'ordenMerito' => $ordenMerito,
             'colegio' => $config['nombre_colegio'] ?? 'Colegio José Tola Pasquel',
             'dre' => $config['dre'] ?? 'DRE ANCASH',
@@ -136,10 +196,10 @@ class BoletaController extends Controller
             ->where('m.anio_escolar', $anioEscolar)
             ->where('m.activo', 1)
             ->where('e.activo', 1)
-            ->select('e.id', DB::raw('ROUND(AVG(n.nota),2) as promedio'))
-            ->groupBy('e.id')
-            ->havingRaw('AVG(n.nota) is not null')
-            ->orderByDesc('promedio')
+            ->select('e.id', DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),2) as promedio'))
+            ->groupBy('e.id', 'e.apellido', 'e.nombre')
+            ->havingRaw('SUM(n.peso) is not null')
+            ->orderByDesc('promedio')->orderBy('e.apellido')->orderBy('e.nombre')
             ->get();
 
         $total = $ranking->count();

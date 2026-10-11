@@ -6,7 +6,7 @@
 @foreach($gradosPorNivel as $nivel => $gradosNivel)
     <optgroup label="{{ $nivel }}">
         @foreach($gradosNivel as $g)
-            <option value="{{ $g->id }}" @selected(($seleccionado ?? null) == $g->id)>{{ $g->nombre }}</option>
+            <option value="{{ $g->id }}" data-nivel="{{ $g->nivel }}" @selected(($seleccionado ?? null) == $g->id)>{{ $g->nombre }}</option>
         @endforeach
     </optgroup>
 @endforeach

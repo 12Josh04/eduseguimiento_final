@@ -43,8 +43,8 @@ class EstudianteController extends Controller
             }
         }
 
-        // ── Determinar vista: paneles (por defecto) o lista (grado/sección/búsqueda específicos) ──
-        $vista = ($request->filled('grado_id') || $request->filled('search')) ? 'lista' : 'paneles';
+        // ── Determinar vista: paneles (por defecto) o lista (grado/sección/búsqueda/nivel específicos) ──
+        $vista = ($request->filled('grado_id') || $request->filled('search') || $request->filled('nivel')) ? 'lista' : 'paneles';
         $estudiantes = $estudiantes ?? collect();
         $paneles = $paneles ?? collect();
 
@@ -73,7 +73,7 @@ class EstudianteController extends Controller
                               AND m.activo = 1
                               AND m.anio_escolar = ' . date('Y') . '
                               LIMIT 1) as seccion'),
-                    DB::raw('(SELECT ROUND(AVG(n.nota),1) FROM notas n WHERE n.estudiante_id=estudiantes.id) as promedio'),
+                    DB::raw('(SELECT ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) FROM notas n WHERE n.estudiante_id=estudiantes.id) as promedio'),
                     DB::raw('(SELECT COUNT(*) FROM conductas c WHERE c.estudiante_id=estudiantes.id AND c.tipo="positivo") as conductas_pos'),
                     DB::raw('(SELECT COUNT(*) FROM conductas c WHERE c.estudiante_id=estudiantes.id AND c.tipo="negativo") as conductas_neg')
                 )
@@ -97,7 +97,9 @@ class EstudianteController extends Controller
                 $query->where(function($q) use ($s) {
                     $q->where('estudiantes.nombre', 'like', "%$s%")
                       ->orWhere('estudiantes.apellido', 'like', "%$s%")
-                      ->orWhere('estudiantes.codigo', 'like', "%$s%");
+                      ->orWhere('estudiantes.codigo', 'like', "%$s%")
+                      ->orWhereRaw("CONCAT(estudiantes.nombre,' ',estudiantes.apellido) LIKE ?", ["%$s%"])
+                      ->orWhereRaw("CONCAT(estudiantes.apellido,' ',estudiantes.nombre) LIKE ?", ["%$s%"]);
                 });
             }
 
@@ -113,8 +115,27 @@ class EstudianteController extends Controller
                 });
             }
 
+            if ($request->filled('nivel')) {
+                $query->whereExists(function($q) use ($request) {
+                    $q->select(DB::raw(1))
+                        ->from('matriculas')
+                        ->join('grados', 'grados.id', '=', 'matriculas.grado_id')
+                        ->whereColumn('matriculas.estudiante_id', 'estudiantes.id')
+                        ->where('matriculas.activo', 1)
+                        ->where('matriculas.anio_escolar', date('Y'))
+                        ->where('grados.nivel', $request->nivel);
+                });
+            }
+
             if ($request->get('export') === 'csv') {
                 $todos = (clone $query)->orderBy('estudiantes.apellido')->get();
+                if ($rol === 'psicologa') {
+                    return csv_response(
+                        'estudiantes.csv',
+                        ['Nombre', 'Apellido', 'Código', 'Grado', 'Nivel', 'Sección', 'Conductas +', 'Conductas -'],
+                        $todos->map(fn($e) => [$e->nombre, $e->apellido, $e->codigo, $e->grado, $e->nivel, $e->seccion, $e->conductas_pos, $e->conductas_neg])
+                    );
+                }
                 return csv_response(
                     'estudiantes.csv',
                     ['Nombre', 'Apellido', 'Código', 'Grado', 'Nivel', 'Sección', 'Promedio', 'Conductas +', 'Conductas -'],
@@ -162,7 +183,7 @@ class EstudianteController extends Controller
                 'g.id as grado_id', 'g.nombre as grado_nombre', 'g.nivel',
                 's.nombre as seccion',
                 DB::raw('COUNT(DISTINCT m.estudiante_id) as total_estudiantes'),
-                DB::raw('ROUND(AVG(n.nota),1) as promedio_seccion')
+                DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) as promedio_seccion')
             )
             ->groupBy('g.id', 'g.nombre', 'g.nivel', 's.nombre')
             ->orderByRaw("FIELD(g.nivel, 'Primaria','Secundaria')")
@@ -187,29 +208,32 @@ class EstudianteController extends Controller
                   ->where('matriculas.activo', 1);
             })
             ->leftJoin('grados', 'matriculas.grado_id', '=', 'grados.id')
-            ->select('estudiantes.*', 'grados.nombre as grado')
+            ->select('estudiantes.*', 'grados.nombre as grado', 'grados.nivel as grado_nivel',
+                'matriculas.id as matricula_id', 'matriculas.libreta_habilitada', 'matriculas.anio_escolar')
             ->where('estudiantes.id', $id)->first();
 
         abort_if(!$estudiante, 404);
         
-        // 🔥 VERIFICAR ACCESO PARA DOCENTE
+        // 🔥 VERIFICAR ACCESO PARA DOCENTE — y, de paso, averiguar en qué cursos concretos
+        // dicta clase a este alumno, para acotar todo lo académico solo a esos cursos
+        // (un docente no debe ver el rendimiento del alumno en materias ajenas a él).
+        $cursoIdsDocente = null;
         if ($rol === 'docente') {
-            $gradosAsignados = DB::table('asignaciones_docente')
-                ->where('docente_id', $usuario->id)
-                ->where('activo', 1)
-                ->where('anio_escolar', date('Y'))
-                ->pluck('grado_id')
-                ->toArray();
-            
-            // Obtener el grado del estudiante desde su matrícula activa
             $matricula = DB::table('matriculas')
                 ->where('estudiante_id', $id)
                 ->where('activo', 1)
                 ->where('anio_escolar', date('Y'))
                 ->first();
-            
+
+            $cursoIdsDocente = $matricula
+                ? DB::table('asignaciones_docente')
+                    ->where('docente_id', $usuario->id)->where('grado_id', $matricula->grado_id)
+                    ->where('activo', 1)->where('anio_escolar', date('Y'))
+                    ->pluck('curso_id')->unique()->values()->all()
+                : [];
+
             // Si el estudiante no está matriculado en un grado asignado al docente, denegar acceso
-            if (!$matricula || !in_array($matricula->grado_id, $gradosAsignados)) {
+            if (!$matricula || empty($cursoIdsDocente)) {
                 abort(403, 'No tienes acceso a este estudiante.');
             }
         }
@@ -218,7 +242,9 @@ class EstudianteController extends Controller
             ->join('cursos', 'notas.curso_id', '=', 'cursos.id')
             ->join('periodos', 'notas.periodo_id', '=', 'periodos.id')
             ->select('notas.*', 'cursos.nombre as curso', 'periodos.nombre as periodo')
-            ->where('notas.estudiante_id', $id)->orderByDesc('notas.fecha')->get();
+            ->where('notas.estudiante_id', $id)
+            ->when($cursoIdsDocente !== null, fn($q) => $q->whereIn('notas.curso_id', $cursoIdsDocente))
+            ->orderByDesc('notas.fecha')->get();
 
         $conductas = DB::table('conductas')
             ->join('users', 'conductas.reportador_id', '=', 'users.id')
@@ -229,14 +255,18 @@ class EstudianteController extends Controller
             ->join('cursos', 'notas.curso_id', '=', 'cursos.id')
             ->select('cursos.nombre', DB::raw('ROUND(AVG(notas.nota),1) as promedio'))
             ->where('notas.estudiante_id', $id)
+            ->when($cursoIdsDocente !== null, fn($q) => $q->whereIn('notas.curso_id', $cursoIdsDocente))
             ->groupBy('cursos.id', 'cursos.nombre')->get();
 
-        $apoderados = DB::table('apoderados')->where('estudiante_id', $id)->get();
+        // Datos de contacto del apoderado: información personal no académica, fuera del
+        // ámbito del docente — solo promotor y psicóloga la ven.
+        $apoderados = $rol === 'docente' ? collect() : DB::table('apoderados')->where('estudiante_id', $id)->get();
 
         $evolucion = DB::table('notas')
             ->join('periodos', 'periodos.id', '=', 'notas.periodo_id')
             ->select('periodos.nombre', DB::raw('ROUND(AVG(notas.nota),1) as promedio'))
             ->where('notas.estudiante_id', $id)
+            ->when($cursoIdsDocente !== null, fn($q) => $q->whereIn('notas.curso_id', $cursoIdsDocente))
             ->groupBy('periodos.id', 'periodos.nombre', 'periodos.fecha_inicio')
             ->orderBy('periodos.fecha_inicio')
             ->get();
@@ -326,6 +356,20 @@ class EstudianteController extends Controller
                 'activo'       => 1,
                 'created_at'   => now(),
                 'updated_at'   => now(),
+            ]);
+        }
+
+        if ($request->filled('apoderado_nombre')) {
+            DB::table('apoderados')->insert([
+                'id'            => Str::uuid(),
+                'estudiante_id' => $estId,
+                'nombre'        => $request->apoderado_nombre,
+                'parentesco'    => $request->apoderado_parentesco ?: 'padre',
+                'telefono'      => $request->apoderado_telefono,
+                'email'         => $request->apoderado_email,
+                'es_principal'  => true,
+                'created_at'    => now(),
+                'updated_at'    => now(),
             ]);
         }
 
@@ -542,5 +586,89 @@ class EstudianteController extends Controller
             'success' => true,
             'message' => "Estudiante {$estudiante->nombre} {$estudiante->apellido} removido de la sección"
         ]);
+    }
+
+    /** Agrega un apoderado a un estudiante ya existente (solo promotor). */
+    public function storeApoderado(Request $request, $estudianteId)
+    {
+        $usuario = Auth::user();
+        if (!$usuario || $usuario->rol !== 'promotor') {
+            abort(403, 'No tienes permiso para registrar apoderados.');
+        }
+
+        $estudiante = DB::table('estudiantes')->where('id', $estudianteId)->first();
+        abort_if(!$estudiante, 404);
+
+        $request->validate([
+            'nombre'     => 'required|string|max:80',
+            'parentesco' => 'required|in:padre,madre,tutor',
+            'telefono'   => 'nullable|string|max:15',
+            'email'      => 'nullable|email|max:120',
+        ]);
+
+        $yaTieneApoderados = DB::table('apoderados')->where('estudiante_id', $estudianteId)->exists();
+
+        DB::table('apoderados')->insert([
+            'id'            => Str::uuid(),
+            'estudiante_id' => $estudianteId,
+            'nombre'        => $request->nombre,
+            'parentesco'    => $request->parentesco,
+            'telefono'      => $request->telefono,
+            'email'         => $request->email,
+            'es_principal'  => !$yaTieneApoderados,
+            'created_at'    => now(),
+            'updated_at'    => now(),
+        ]);
+
+        registrar_auditoria('crear', 'apoderados', null, "{$request->nombre} ({$estudiante->nombre} {$estudiante->apellido})");
+
+        return back()->with('success', 'Apoderado registrado correctamente.');
+    }
+
+    /** Elimina un apoderado (solo promotor). */
+    public function destroyApoderado($id)
+    {
+        $usuario = Auth::user();
+        if (!$usuario || $usuario->rol !== 'promotor') {
+            abort(403, 'No tienes permiso para eliminar apoderados.');
+        }
+
+        $apoderado = DB::table('apoderados')->where('id', $id)->first();
+        abort_if(!$apoderado, 404);
+
+        DB::table('apoderados')->where('id', $id)->delete();
+
+        registrar_auditoria('eliminar', 'apoderados', $apoderado->nombre, null);
+
+        return back()->with('success', 'Apoderado eliminado.');
+    }
+
+    /**
+     * Habilita/deshabilita, para la matrícula vigente de un alumno, su acceso a
+     * "Mi Libreta de Notas" (boleta oficial). Solo el promotor puede autorizarlo, y queda
+     * atado al año de matrícula: si el alumno se vuelve a matricular más adelante, la
+     * nueva matrícula nace habilitada por defecto.
+     */
+    public function toggleLibreta($estudianteId)
+    {
+        $usuario = Auth::user();
+        if (!$usuario || $usuario->rol !== 'promotor') {
+            abort(403, 'No tienes permiso para esta acción.');
+        }
+
+        $matricula = DB::table('matriculas')->where('estudiante_id', $estudianteId)->where('activo', 1)->first();
+        abort_if(!$matricula, 404, 'El alumno no tiene una matrícula vigente.');
+
+        $nuevoEstado = !$matricula->libreta_habilitada;
+        DB::table('matriculas')->where('id', $matricula->id)->update([
+            'libreta_habilitada' => $nuevoEstado,
+            'updated_at' => now(),
+        ]);
+
+        registrar_auditoria('actualizar', 'matriculas', 'libreta_habilitada=' . ($matricula->libreta_habilitada ? 1 : 0), 'libreta_habilitada=' . ($nuevoEstado ? 1 : 0));
+
+        return back()->with('success', $nuevoEstado
+            ? 'El alumno ya puede ver su Libreta de Notas.'
+            : 'Se deshabilitó el acceso del alumno a su Libreta de Notas.');
     }
 }

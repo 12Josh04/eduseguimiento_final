@@ -87,7 +87,17 @@
                         <td style="min-width:200px">
                             <form action="{{ route('actividades.calificar', ['id' => $actividad->id, 'estudiante' => $e->estudiante_id]) }}" method="POST" style="display:flex;gap:.3rem;align-items:center">
                                 @csrf
-                                <input type="number" name="nota" class="form-control" style="width:70px" min="0" max="20" step="0.5" value="{{ $e->nota }}" required>
+                                @if($actividad->grado_nivel === 'Primaria')
+                                    <select name="nota_letra" class="form-control" style="width:90px" required>
+                                        <option value="">—</option>
+                                        <option value="AD" {{ $e->nota_letra==='AD'?'selected':'' }}>AD</option>
+                                        <option value="A" {{ $e->nota_letra==='A'?'selected':'' }}>A</option>
+                                        <option value="B" {{ $e->nota_letra==='B'?'selected':'' }}>B</option>
+                                        <option value="C" {{ $e->nota_letra==='C'?'selected':'' }}>C</option>
+                                    </select>
+                                @else
+                                    <input type="number" name="nota" class="form-control" style="width:70px" min="0" max="20" step="0.5" value="{{ $e->nota }}" required>
+                                @endif
                                 <input type="text" name="observacion_docente" class="form-control" placeholder="Comentario (opcional)" value="{{ $e->observacion_docente }}" style="max-width:180px">
                                 <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i></button>
                             </form>

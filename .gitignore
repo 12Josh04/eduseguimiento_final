@@ -1,4 +1,14 @@
 /.phpunit.cache
+.vs/
+.vscode/
+.idea/
+node_modules/
+vendor/
+*.log
+logs/
+uploads/
+.env
+config.local.php
 .phpunit.result.cache
 /node_modules
 /public/build

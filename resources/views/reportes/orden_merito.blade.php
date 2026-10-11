@@ -35,6 +35,7 @@
     </div>
 </div>
 
+@php $esPrimaria = optional($grados->firstWhere('id',$gradoId))->nivel === 'Primaria'; @endphp
 <div class="card">
     <div class="card-header">
         <div class="card-title"><i class="fas fa-list-ol"></i> Ranking — {{ optional($grados->firstWhere('id',$gradoId))->nombre }} "{{ $seccion }}"</div>
@@ -46,7 +47,7 @@
                     <th style="width:70px">Puesto</th>
                     <th>Estudiante</th>
                     <th>Código</th>
-                    <th>Promedio</th>
+                    @if(!$esPrimaria)<th>Promedio</th>@endif
                     <th>Nivel de logro</th>
                     <th>Conductas negativas</th>
                 </tr>
@@ -63,7 +64,7 @@
                     </td>
                     <td>{{ $r->nombre }}</td>
                     <td>{{ $r->codigo }}</td>
-                    <td><strong>{{ $r->promedio ?? '—' }}</strong></td>
+                    @if(!$esPrimaria)<td><strong>{{ $r->promedio ?? '—' }}</strong></td>@endif
                     <td>
                         @if($r->nl)
                             <span style="font-weight:800;color:{{ nivel_logro_color($r->nl) }}">{{ $r->nl }}</span>
@@ -75,7 +76,7 @@
                     <td>{{ $r->conductas_neg }}</td>
                 </tr>
                 @empty
-                <tr><td colspan="6"><div class="empty-state" style="padding:2rem"><p>No hay estudiantes matriculados en esta sección, o aún no tienen notas registradas.</p></div></td></tr>
+                <tr><td colspan="{{ $esPrimaria ? 5 : 6 }}"><div class="empty-state" style="padding:2rem"><p>No hay estudiantes matriculados en esta sección, o aún no tienen notas registradas.</p></div></td></tr>
                 @endforelse
             </tbody>
         </table>

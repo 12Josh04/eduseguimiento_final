@@ -39,8 +39,13 @@
     <div class="card-body">
         <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
             <div style="text-align:center;padding:.75rem 1.25rem;background:var(--success-soft);border-radius:10px">
-                <div style="font-size:1.8rem;font-weight:800;color:{{ $entrega->nota>=14?'var(--success)':($entrega->nota>=11?'var(--warning)':'var(--danger)') }}">{{ number_format($entrega->nota,1) }}</div>
-                <div style="font-size:.7rem;color:var(--n400);font-weight:600">NOTA /20</div>
+                @if($entrega->nota_letra)
+                    <div style="font-size:1.8rem;font-weight:800;color:{{ nivel_logro_color($entrega->nota_letra) }}">{{ $entrega->nota_letra }}</div>
+                    <div style="font-size:.7rem;color:var(--n400);font-weight:600">NIVEL DE LOGRO</div>
+                @else
+                    <div style="font-size:1.8rem;font-weight:800;color:{{ $entrega->nota>=14?'var(--success)':($entrega->nota>=11?'var(--warning)':'var(--danger)') }}">{{ number_format($entrega->nota,1) }}</div>
+                    <div style="font-size:.7rem;color:var(--n400);font-weight:600">NOTA /20</div>
+                @endif
             </div>
             @if($entrega->calificado_en)
                 <span style="font-size:.82rem;color:var(--n400)">Calificado el {{ \Carbon\Carbon::parse($entrega->calificado_en)->format('d/m/Y H:i') }}</span>

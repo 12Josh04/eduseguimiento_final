@@ -1,12 +1,14 @@
 @extends('layouts.app')
-@section('title','Conductas')
+@section('title', Auth::user()->rol === 'estudiante' ? 'Mi Conducta' : 'Conductas')
 @section('content')
+
+@php $esEstudiante = Auth::user()->rol === 'estudiante'; @endphp
 
 <div class="page-header">
     <div>
-        <div class="breadcrumb"><a href="/dashboard"><i class="fas fa-home"></i></a><span style="margin:0 .3rem">/</span><span>Conductas</span></div>
-        <h1 class="page-title">Sistema Conductual</h1>
-        <p class="page-subtitle">Registro y seguimiento de comportamiento estudiantil</p>
+        <div class="breadcrumb"><a href="/dashboard"><i class="fas fa-home"></i></a><span style="margin:0 .3rem">/</span><span>{{ $esEstudiante ? 'Mi Conducta' : 'Conductas' }}</span></div>
+        <h1 class="page-title">{{ $esEstudiante ? 'Mi Conducta' : 'Sistema Conductual' }}</h1>
+        <p class="page-subtitle">{{ $esEstudiante ? 'Tus registros de comportamiento' : 'Registro y seguimiento de comportamiento estudiantil' }}</p>
     </div>
     @if(in_array(Auth::user()->rol,['promotor','docente','psicologa']))
     <button class="btn btn-success" data-modal-open="modalConducta"><i class="fas fa-plus"></i> Registrar Conducta</button>
@@ -20,14 +22,16 @@
 </div>
 
 <div class="filter-bar">
+    @unless($esEstudiante)
     <div class="search-bar"><i class="fas fa-search"></i><input type="text" class="form-control" id="tableSearch" placeholder="Buscar estudiante..."></div>
+    @endunless
     <select class="form-control" style="min-width:140px" id="filtroTipo">
         <option value="">Todos los tipos</option>
         <option value="positivo">✓ Positivo</option>
         <option value="negativo">✗ Negativo</option>
         <option value="observacion">● Observación</option>
     </select>
-    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('filtroTipo').value='';document.getElementById('tableSearch').value='';document.querySelectorAll('tbody tr').forEach(r=>r.style.display='')">
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('filtroTipo').value='';var ts=document.getElementById('tableSearch');if(ts)ts.value='';document.querySelectorAll('tbody tr').forEach(r=>r.style.display='')">
         <i class="fas fa-times"></i> Limpiar
     </button>
 </div>
@@ -84,7 +88,7 @@
             @csrf
             <div class="modal-body">
                 <div class="form-group"><label class="form-label">Estudiante *</label>
-                    <select name="estudiante_id" class="form-control" required>
+                    <select name="estudiante_id" class="form-control" required data-searchable data-placeholder="Escribe el nombre del estudiante...">
                         <option value="">— Seleccionar —</option>
                         @foreach($estudiantes as $est)<option value="{{ $est->id }}">{{ $est->nombre }}</option>@endforeach
                     </select>
@@ -107,7 +111,7 @@
 @push('scripts')
 <script>
 document.getElementById('filtroTipo').addEventListener('change',function(){
-    const t=this.value,s=document.getElementById('tableSearch').value.toLowerCase();
+    const t=this.value,s=(document.getElementById('tableSearch')?.value||'').toLowerCase();
     document.querySelectorAll('#tablaConductas tbody tr').forEach(r=>{
         r.style.display=(!t||r.dataset.tipo===t)&&(!s||r.textContent.toLowerCase().includes(s))?'':'none';
     });

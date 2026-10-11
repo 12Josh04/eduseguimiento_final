@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar Sesión — EduSeguimiento</title>
+    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <style>
@@ -56,6 +57,7 @@
         .test-account-box { background: rgba(255,255,255,0.15); padding: 15px; border-radius: 15px; margin-top: 20px; }
         .test-account { cursor: pointer; padding: 8px; border-radius: 6px; display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 5px; }
         .test-account:hover { background: rgba(255,255,255,0.25); }
+        .login-error { background:#fdecea; color:#c0392b; border:1px solid #f5c6cb; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:.85rem; display:flex; align-items:center; gap:.5rem; }
     </style>
 </head>
 <body>
@@ -65,11 +67,17 @@
         <h2>{{ nombre_institucion() }}</h2>
         <p>Plataforma académica institucional</p>
         
+        @if ($errors->any())
+            <div class="login-error">
+                <i class="fas fa-circle-exclamation"></i>
+                <span>{{ $errors->first() }}</span>
+            </div>
+        @endif
         <form method="POST" action="/login">
             @csrf
             <div class="form-group">
                 <label>User Name</label>
-                <input type="email" name="email" id="email" class="form-control" placeholder="correo@colegio.edu.pe" required>
+                <input type="email" name="email" id="email" class="form-control" placeholder="correo@colegio.edu.pe" value="{{ old('email') }}" required>
             </div>
             <div class="form-group">
                 <label>Contraseña</label>

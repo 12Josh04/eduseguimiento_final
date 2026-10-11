@@ -63,18 +63,34 @@ class NotaController extends Controller
                 if ($est) $query->where('notas.estudiante_id', $est->id);
             }
 
+            // Un docente solo debe ver evaluaciones de los cursos que él mismo dicta al
+            // alumno (par grado+curso realmente asignado), aunque esté consultando la
+            // ficha de un estudiante que también lleva otros cursos con otros docentes.
+            if ($rol === 'docente') {
+                $query->whereExists(function ($q) use ($docenteId) {
+                    $q->select(DB::raw(1))->from('asignaciones_docente as ad')
+                        ->join('matriculas as m', function ($j) {
+                            $j->on('m.estudiante_id', '=', 'notas.estudiante_id')
+                              ->where('m.activo', 1)->where('m.anio_escolar', date('Y'));
+                        })
+                        ->whereColumn('ad.grado_id', 'm.grado_id')->whereColumn('ad.curso_id', 'notas.curso_id')
+                        ->where('ad.docente_id', $docenteId)->where('ad.activo', 1)->where('ad.anio_escolar', date('Y'));
+                });
+            }
+
             $notas = $query->orderByDesc('notas.fecha')->paginate(20);
         } elseif ($vista === 'cursos') {
             $cursosSeccion = $this->construirCursosPorSeccion($request->grado_id, $request->seccion, $rol, $docenteId);
         } else {
-            $paneles = $this->construirPanelesNotas($rol, $gradoIdsPermitidos);
+            $paneles = $this->construirPanelesNotas($rol, $gradoIdsPermitidos, $docenteId);
         }
 
         return view('notas.index', compact('notas', 'cursos', 'periodos', 'grados', 'estudiantes', 'vista', 'paneles', 'cursosSeccion', 'gradoIdsPermitidos'));
     }
 
-    /** Agrupa por Nivel → Grado → Sección: total de estudiantes y promedio de notas registradas. */
-    private function construirPanelesNotas(string $rol, array $gradoIdsPermitidos)
+    /** Agrupa por Nivel → Grado → Sección: total de estudiantes y promedio de notas registradas
+     *  (para un docente, solo cuenta las notas del curso que él mismo dicta en ese grado). */
+    private function construirPanelesNotas(string $rol, array $gradoIdsPermitidos, ?string $docenteId = null)
     {
         $query = DB::table('secciones as s')
             ->join('grados as g', 'g.id', '=', 's.grado_id')
@@ -84,7 +100,16 @@ class NotaController extends Controller
                   ->where('m.activo', 1)
                   ->where('m.anio_escolar', date('Y'));
             })
-            ->leftJoin('notas as n', 'n.estudiante_id', '=', 'm.estudiante_id')
+            ->leftJoin('notas as n', function ($j) use ($rol, $docenteId) {
+                $j->on('n.estudiante_id', '=', 'm.estudiante_id');
+                if ($rol === 'docente') {
+                    $j->whereExists(function ($q) use ($docenteId) {
+                        $q->select(DB::raw(1))->from('asignaciones_docente as ad')
+                            ->whereColumn('ad.grado_id', 'g.id')->whereColumn('ad.curso_id', 'n.curso_id')
+                            ->where('ad.docente_id', $docenteId)->where('ad.activo', 1)->where('ad.anio_escolar', date('Y'));
+                    });
+                }
+            })
             ->where('s.activo', 1)
             ->where('g.activo', 1)
             ->where('g.anio_escolar', date('Y'));
@@ -98,7 +123,7 @@ class NotaController extends Controller
                 'g.id as grado_id', 'g.nombre as grado_nombre', 'g.nivel',
                 's.nombre as seccion',
                 DB::raw('COUNT(DISTINCT m.estudiante_id) as total_estudiantes'),
-                DB::raw('ROUND(AVG(n.nota),1) as promedio_seccion'),
+                DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) as promedio_seccion'),
                 DB::raw('COUNT(n.id) as total_notas')
             )
             ->groupBy('g.id', 'g.nombre', 'g.nivel', 's.nombre')
@@ -148,7 +173,7 @@ class NotaController extends Controller
 
         $query->addSelect(['promedio' => DB::table('notas as n')
             ->join('matriculas as m', 'm.estudiante_id', '=', 'n.estudiante_id')
-            ->selectRaw('ROUND(AVG(n.nota),1)')
+            ->selectRaw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1)')
             ->whereColumn('n.curso_id', 'c.id')
             ->where('m.grado_id', $gradoId)
             ->where('m.seccion', $seccion)
@@ -231,20 +256,91 @@ class NotaController extends Controller
             ->get()
             ->groupBy('estudiante_id');
 
+        // ── Libreta manual: Nivel de Logro y conclusión descriptiva que el docente llena a mano ──
+        $libretaExistente = DB::table('libreta_notas')
+            ->where('curso_id', $cursoId)
+            ->whereIn('estudiante_id', $gradebook->pluck('id'))
+            ->get()
+            ->groupBy('estudiante_id');
+
         foreach ($gradebook as $est) {
             $notasEst = $notasCurso->get($est->id, collect());
+            $libretaEst = $libretaExistente->get($est->id, collect())->keyBy('periodo_id');
             $est->bimestres = [];
+            $est->libreta = [];
             foreach ($periodos as $p) {
                 $np = $notasEst->where('periodo_id', $p->id);
-                $est->bimestres[$p->id] = $np->count() ? round($np->avg('nota'), 1) : null;
+                $est->bimestres[$p->id] = $np->count() ? promedio_ponderado($np) : null;
+
+                $manual = $libretaEst->get($p->id);
+                $est->libreta[$p->id] = [
+                    'nivel_logro' => $manual->nivel_logro ?? null,
+                    'conclusion' => $manual->conclusion ?? null,
+                    'sugerido' => $est->bimestres[$p->id] !== null ? nivel_logro_letra($est->bimestres[$p->id]) : null,
+                ];
             }
-            $est->promedio_final = $notasEst->count() ? round($notasEst->avg('nota'), 1) : null;
+            $est->promedio_final = $this->promedioFinalDeBimestres($est->bimestres);
             $est->total_evaluaciones = $notasEst->count();
         }
 
         $pctClases = min(100, round(($clases->count() / self::META_CLASES_ANIO) * 100));
 
         return view('notas.curso', compact('curso', 'grado', 'seccion', 'asignacion', 'clases', 'gradebook', 'periodos', 'rol', 'pctClases', 'actividades'));
+    }
+
+    /** Guarda, para un estudiante y curso, el Nivel de Logro y la conclusión descriptiva de cada bimestre (llenado manual de la libreta por el docente). */
+    public function storeLibreta(Request $request, $cursoId)
+    {
+        $request->validate([
+            'estudiante_id' => 'required|exists:estudiantes,id',
+            'periodos' => 'required|array',
+            'periodos.*.nivel_logro' => 'nullable|in:AD,A,B,C',
+            'periodos.*.conclusion' => 'nullable|string|max:500',
+        ]);
+
+        $rol = session('user_rol');
+        $docenteId = session('user_id');
+
+        if ($rol === 'docente') {
+            $tieneAsignacion = DB::table('asignaciones_docente')
+                ->where('docente_id', $docenteId)->where('curso_id', $cursoId)->where('activo', 1)->exists();
+            abort_if(!$tieneAsignacion, 403, 'No tienes asignado este curso.');
+        }
+
+        foreach ($request->periodos as $periodoId => $datos) {
+            if (empty($datos['nivel_logro']) && empty($datos['conclusion'])) {
+                continue;
+            }
+
+            $existente = DB::table('libreta_notas')
+                ->where('estudiante_id', $request->estudiante_id)
+                ->where('curso_id', $cursoId)
+                ->where('periodo_id', $periodoId)
+                ->first();
+
+            $valores = [
+                'nivel_logro' => $datos['nivel_logro'] ?: null,
+                'conclusion' => $datos['conclusion'] ?: null,
+                'docente_id' => $docenteId,
+                'updated_at' => now(),
+            ];
+
+            if ($existente) {
+                DB::table('libreta_notas')->where('id', $existente->id)->update($valores);
+            } else {
+                DB::table('libreta_notas')->insert(array_merge($valores, [
+                    'id' => (string) Str::uuid(),
+                    'estudiante_id' => $request->estudiante_id,
+                    'curso_id' => $cursoId,
+                    'periodo_id' => $periodoId,
+                    'created_at' => now(),
+                ]));
+            }
+        }
+
+        registrar_auditoria('actualizar', 'libreta_notas', null, "Libreta actualizada para estudiante {$request->estudiante_id}");
+
+        return back()->with('success', 'Libreta actualizada correctamente.');
     }
 
     /** Panel por curso de un estudiante puntual (dentro de un grado/sección): % de clases desarrolladas, promedio y registro rápido de notas. */
@@ -281,6 +377,10 @@ class NotaController extends Controller
 
         $periodos = DB::table('periodos')->where('activo', 1)->orderBy('fecha_inicio')->get();
 
+        $nivelesPorGrado = DB::table('grados')
+            ->whereIn('id', $cursosPanel->pluck('grado_id')->unique())
+            ->pluck('nivel', 'id');
+
         $notasEstudiante = DB::table('notas')
             ->where('estudiante_id', $estudianteId)
             ->whereIn('curso_id', $cursosPanel->pluck('curso_id'))
@@ -288,13 +388,21 @@ class NotaController extends Controller
             ->groupBy('curso_id');
 
         foreach ($cursosPanel as $c) {
+            $c->nivel = $nivelesPorGrado->get($c->grado_id);
+            $c->es_primaria = es_nivel_primaria($c->nivel);
             $notasC = $notasEstudiante->get($c->curso_id, collect());
-            $c->promedio = $notasC->count() ? round($notasC->avg('nota'), 1) : null;
             $c->bimestres = [];
             foreach ($periodos as $p) {
                 $np = $notasC->where('periodo_id', $p->id);
-                $c->bimestres[$p->id] = $np->count() ? round($np->avg('nota'), 1) : null;
+                $c->bimestres[$p->id] = $np->count() ? promedio_ponderado($np) : null;
             }
+            $c->promedio = $this->promedioFinalDeBimestres($c->bimestres);
+
+            // Detalle de todas las evaluaciones individuales del curso, para ver cómo se compone el bimestre.
+            $c->evaluaciones = $notasC->map(function ($n) use ($periodos) {
+                $n->periodo_nombre = optional($periodos->firstWhere('id', $n->periodo_id))->nombre;
+                return $n;
+            })->sortByDesc('fecha')->values();
 
             $totalClases = DB::table('clases_desarrolladas')
                 ->where('curso_id', $c->curso_id)->where('grado_id', $c->grado_id)
@@ -307,6 +415,14 @@ class NotaController extends Controller
         }
 
         return view('notas.estudiante-cursos', compact('estudiante', 'grado', 'seccion', 'cursosPanel', 'periodos', 'rol'));
+    }
+
+    /** Promedio final = media simple de los promedios de bimestre que sí tienen notas (no un promedio de todas las evaluaciones mezcladas). */
+    private function promedioFinalDeBimestres(array $bimestres): ?float
+    {
+        $conDatos = array_filter($bimestres, fn ($v) => $v !== null);
+        if (!$conDatos) return null;
+        return round(array_sum($conDatos) / count($conDatos), 1);
     }
 
     public function storeClase(Request $request, $cursoId)
@@ -357,18 +473,25 @@ class NotaController extends Controller
 
     public function store(Request $request)
     {
+        $matricula = DB::table('matriculas')->where('estudiante_id', $request->estudiante_id)->where('activo', 1)->latest('created_at')->first();
+        $grado = $matricula?->grado_id ? DB::table('grados')->where('id', $matricula->grado_id)->first() : null;
+        $esPrimaria = es_nivel_primaria($grado->nivel ?? null);
+
         $request->validate([
             'estudiante_id'     => 'required',
             'curso_id'          => 'required',
             'periodo_id'        => 'required',
             'tipo_evaluacion'   => 'required|in:examen,tarea,practica',
             'nombre_evaluacion' => 'required',
-            'nota'              => 'required|numeric|min:0|max:20',
-            'nota_maxima'       => 'required|numeric|min:1',
+            'nota'              => $esPrimaria ? 'nullable' : 'required|numeric|min:0|max:20',
+            'nota_letra'        => $esPrimaria ? 'required|in:AD,A,B,C' : 'nullable|in:AD,A,B,C',
+            'nota_maxima'       => 'nullable|numeric|min:1',
+            'peso'              => 'nullable|numeric|min:0.1|max:10',
             'fecha'             => 'required|date',
         ]);
 
-        $matricula = DB::table('matriculas')->where('estudiante_id', $request->estudiante_id)->where('activo', 1)->latest('created_at')->first();
+        $notaLetra = $esPrimaria ? $request->nota_letra : null;
+        $notaNumerica = $esPrimaria ? nota_desde_letra($notaLetra) : $request->nota;
 
         DB::table('notas')->insert([
             'id'                => Str::uuid(),
@@ -380,13 +503,15 @@ class NotaController extends Controller
             'periodo_id'        => $request->periodo_id,
             'tipo_evaluacion'   => $request->tipo_evaluacion,
             'nombre_evaluacion' => $request->nombre_evaluacion,
-            'nota'              => $request->nota,
-            'nota_maxima'       => $request->nota_maxima,
+            'nota'              => $notaNumerica,
+            'nota_letra'        => $notaLetra,
+            'nota_maxima'       => $request->filled('nota_maxima') ? $request->nota_maxima : 20,
+            'peso'              => $request->filled('peso') ? $request->peso : peso_por_defecto($request->tipo_evaluacion),
             'fecha'             => $request->fecha,
             'creado_en'         => now(),
         ]);
 
-        registrar_auditoria('crear', 'notas', null, "{$request->nombre_evaluacion}: {$request->nota}/{$request->nota_maxima}");
+        registrar_auditoria('crear', 'notas', null, "{$request->nombre_evaluacion}: " . ($notaLetra ?? "{$notaNumerica}/{$request->nota_maxima}"));
 
         return back()->with('success','Nota registrada correctamente.');
     }
@@ -417,28 +542,92 @@ class NotaController extends Controller
 
     public function promedios()
     {
-        $promedios_cursos = DB::table('notas')
-            ->join('cursos','notas.curso_id','=','cursos.id')
-            ->select('cursos.nombre', DB::raw('ROUND(AVG(nota), 1) as promedio'))
-            ->groupBy('cursos.id','cursos.nombre')->get()
-            ->map(fn($c) => ['nombre'=>$c->nombre,'promedio'=>$c->promedio,'max'=>20])
-            ->toArray();
+        $rol = session('user_rol');
+        $docenteId = session('user_id');
 
-        $promedios = DB::table('notas')
-            ->join('estudiantes','notas.estudiante_id','=','estudiantes.id')
-            ->join('cursos','notas.curso_id','=','cursos.id')
-            ->leftJoin('matriculas', fn($j) => $j->on('estudiantes.id','=','matriculas.estudiante_id')->where('matriculas.activo',1))
-            ->leftJoin('grados','matriculas.grado_id','=','grados.id')
+        // ── Estudiante: solo su propio resumen (antes esta página mostraba a todos
+        // los estudiantes del colegio a cualquiera que entrara, sin restricción). ──
+        if ($rol === 'estudiante') {
+            $estudiante = DB::table('estudiantes')->where('usuario_id', $docenteId)->first();
+            abort_if(!$estudiante, 404);
+
+            $grado = DB::table('matriculas as m')
+                ->join('grados as g', 'g.id', '=', 'm.grado_id')
+                ->where('m.estudiante_id', $estudiante->id)->where('m.activo', 1)
+                ->select('g.nombre', 'g.nivel')->first();
+
+            $cursos = DB::table('notas as n')
+                ->join('cursos as c', 'c.id', '=', 'n.curso_id')
+                ->where('n.estudiante_id', $estudiante->id)
+                ->select('c.nombre', DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) as promedio'))
+                ->groupBy('c.id', 'c.nombre')->orderBy('c.nombre')->get();
+
+            $promedioGeneral = $cursos->count() ? round($cursos->avg('promedio'), 1) : null;
+
+            return view('notas.promedios-alumno', compact('estudiante', 'grado', 'cursos', 'promedioGeneral'));
+        }
+
+        // ── Promotor / Docente: panorama institucional (o solo sus grados asignados,
+        // si es docente), agrupado por Grado y Sección, con los estudiantes de cada
+        // salón en orden alfabético. ─────────────────────────────────────────────
+        $gradoIdsPermitidos = null;
+        if ($rol === 'docente') {
+            $gradoIdsPermitidos = DB::table('asignaciones_docente')
+                ->where('docente_id', $docenteId)->where('activo', 1)->where('anio_escolar', date('Y'))
+                ->pluck('grado_id')->unique()->values()->all();
+        }
+
+        $promediosCursosPorNivel = [];
+        foreach (['Primaria', 'Secundaria'] as $nivel) {
+            $q = DB::table('notas as n')
+                ->join('cursos as c', 'c.id', '=', 'n.curso_id')
+                ->join('matriculas as m', function ($j) {
+                    $j->on('m.estudiante_id', '=', 'n.estudiante_id')->where('m.activo', 1)->where('m.anio_escolar', date('Y'));
+                })
+                ->join('grados as g', 'g.id', '=', 'm.grado_id')
+                ->where('g.nivel', $nivel);
+            if ($gradoIdsPermitidos !== null) $q->whereIn('g.id', $gradoIdsPermitidos ?: ['__ninguno__']);
+
+            $promediosCursosPorNivel[$nivel] = $q
+                ->select('c.nombre', DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) as promedio'))
+                ->groupBy('c.id', 'c.nombre')->orderBy('c.nombre')->get();
+        }
+
+        $matriculas = DB::table('matriculas as m')
+            ->join('estudiantes as e', 'e.id', '=', 'm.estudiante_id')
+            ->join('grados as g', 'g.id', '=', 'm.grado_id')
+            ->where('m.activo', 1)->where('m.anio_escolar', date('Y'))->where('e.activo', 1)
+            ->when($gradoIdsPermitidos !== null, fn($q) => $q->whereIn('g.id', $gradoIdsPermitidos ?: ['__ninguno__']))
             ->select(
-                'estudiantes.id',
-                DB::raw("CONCAT(estudiantes.nombre,' ',estudiantes.apellido) as nombre"),
-                'grados.nombre as grado',
-                'cursos.nombre as curso',
-                DB::raw('ROUND(AVG(notas.nota),1) as promedio')
+                'e.id as estudiante_id', DB::raw("CONCAT(e.nombre,' ',e.apellido) as estudiante_nombre"),
+                'g.id as grado_id', 'g.nombre as grado_nombre', 'g.nivel', 'm.seccion'
             )
-            ->groupBy('estudiantes.id','estudiantes.nombre','estudiantes.apellido','grados.nombre','cursos.nombre')
+            ->orderBy('e.apellido')->orderBy('e.nombre')
             ->get();
 
-        return view('notas.promedios', compact('promedios','promedios_cursos'));
+        $promediosPorEst = DB::table('notas')
+            ->select('estudiante_id', DB::raw('ROUND(SUM(nota*peso)/NULLIF(SUM(peso),0),1) as promedio'))
+            ->groupBy('estudiante_id')->get()->keyBy('estudiante_id');
+
+        $porCursoEst = DB::table('notas as n')
+            ->join('cursos as c', 'c.id', '=', 'n.curso_id')
+            ->select('n.estudiante_id', 'c.nombre as curso', DB::raw('ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) as promedio'))
+            ->groupBy('n.estudiante_id', 'c.nombre')->get()->groupBy('estudiante_id');
+
+        foreach ($matriculas as $m) {
+            $m->promedio = optional($promediosPorEst->get($m->estudiante_id))->promedio;
+            $m->cursos = $porCursoEst->get($m->estudiante_id, collect())->pluck('promedio', 'curso');
+        }
+
+        $cursoNombres = DB::table('cursos')->where('activo', 1)->orderBy('nombre')->pluck('nombre');
+
+        // Grupos: "Nivel|Grado|Sección" — el orden alfabético del texto ya deja Primaria
+        // antes que Secundaria, y los estudiantes dentro de cada grupo ya vienen ordenados
+        // por apellido desde la consulta.
+        $secciones = $matriculas
+            ->groupBy(fn($m) => $m->nivel . '||' . $m->grado_nombre . '||' . $m->seccion)
+            ->sortKeys();
+
+        return view('notas.promedios', compact('promediosCursosPorNivel', 'secciones', 'cursoNombres'));
     }
 }

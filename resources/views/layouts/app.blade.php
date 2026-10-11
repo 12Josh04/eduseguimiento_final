@@ -14,6 +14,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title','EduSeguimiento') — {{ nombre_institucion() }}</title>
+    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
@@ -37,9 +38,31 @@
         <button class="btn-icon-nav" id="themeToggle" title="Cambiar tema claro/oscuro">
             <i class="fas fa-moon" id="themeToggleIcon"></i>
         </button>
-        <button class="btn-icon-nav" title="Notificaciones">
-            <i class="fas fa-bell"></i>
-        </button>
+        @php $notificaciones = notificaciones_navbar(); @endphp
+        <div class="notif-menu" id="notifMenuToggle">
+            <button class="btn-icon-nav" title="Notificaciones">
+                <i class="fas fa-bell"></i>
+                @if(count($notificaciones) > 0)
+                    <span class="badge-notif">{{ count($notificaciones) }}</span>
+                @endif
+            </button>
+            <div class="notif-dropdown" id="notifDropdown">
+                <div class="notif-dropdown-header">Notificaciones</div>
+                @forelse($notificaciones as $n)
+                    <a href="{{ $n['url'] }}" class="notif-item">
+                        <span class="notif-item-icon notif-{{ $n['color'] }}"><i class="fas {{ $n['icono'] }}"></i></span>
+                        <span class="notif-item-text">
+                            {{ $n['texto'] }}
+                            @if(!empty($n['tiempo']))
+                                <span class="notif-item-time">{{ \Carbon\Carbon::parse($n['tiempo'])->diffForHumans() }}</span>
+                            @endif
+                        </span>
+                    </a>
+                @empty
+                    <div class="notif-empty"><i class="fas fa-circle-check"></i> No hay nada pendiente por ahora.</div>
+                @endforelse
+            </div>
+        </div>
         <div class="user-menu" id="userMenuToggle">
             <div class="user-avatar">
                 {{ strtoupper(substr(Auth::user()->nombre ?? 'U', 0, 1)) }}
@@ -161,12 +184,6 @@
             <a href="/estudiantes" class="nav-link {{ request()->is('estudiantes*') ? 'active' : '' }}">
                 <i class="fas fa-user-graduate"></i><span>Estudiantes</span>
             </a>
-            <a href="/notas" class="nav-link {{ request()->is('notas') ? 'active' : '' }}">
-                <i class="fas fa-clipboard-list"></i><span>Notas</span>
-            </a>
-            <a href="/notas/promedios" class="nav-link {{ request()->is('notas/promedios') ? 'active' : '' }}">
-                <i class="fas fa-chart-bar"></i><span>Promedios</span>
-            </a>
         </div>
         <div class="nav-section">
             <span class="nav-section-label">Conductual</span>
@@ -189,20 +206,11 @@
             <a href="/estudiantes" class="nav-link {{ request()->is('estudiantes*') ? 'active' : '' }}">
                 <i class="fas fa-user-graduate"></i><span>Mis Alumnos</span>
             </a>
-            <a href="/notas" class="nav-link {{ request()->is('notas') && !request()->is('notas/promedios') ? 'active' : '' }}">
+            <a href="/notas" class="nav-link {{ request()->is('notas') ? 'active' : '' }}">
                 <i class="fas fa-clipboard-list"></i><span>Mis Notas</span>
-            </a>
-            <a href="/notas/promedios" class="nav-link {{ request()->is('notas/promedios') ? 'active' : '' }}">
-                <i class="fas fa-chart-bar"></i><span>Promedios</span>
             </a>
             <a href="/conductas" class="nav-link {{ request()->is('conductas') ? 'active' : '' }}">
                 <i class="fas fa-heart"></i><span>Conductas</span>
-            </a>
-            <a href="/reportes/orden-merito" class="nav-link {{ request()->is('reportes/orden-merito') ? 'active' : '' }}">
-                <i class="fas fa-medal"></i><span>Orden de Mérito</span>
-            </a>
-            <a href="/reportes/comparativo-secciones" class="nav-link {{ request()->is('reportes/comparativo-secciones') ? 'active' : '' }}">
-                <i class="fas fa-balance-scale"></i><span>Comparativo Secciones</span>
             </a>
             <a href="/asistencias" class="nav-link {{ request()->is('asistencias') ? 'active' : '' }}">
                 <i class="fas fa-calendar-check"></i><span>Asistencias</span>

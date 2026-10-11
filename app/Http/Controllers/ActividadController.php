@@ -19,6 +19,7 @@ class ActividadController extends Controller
             'titulo' => 'required|string|max:160',
             'instrucciones' => 'required|string',
             'tipo_evaluacion' => 'required|in:examen,tarea,practica',
+            'peso' => 'nullable|numeric|min:0.1|max:10',
             'fecha_entrega' => 'nullable|date',
             'archivo' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:8192',
         ]);
@@ -48,6 +49,7 @@ class ActividadController extends Controller
             'titulo' => $request->titulo,
             'instrucciones' => $request->instrucciones,
             'tipo_evaluacion' => $request->tipo_evaluacion,
+            'peso' => $request->filled('peso') ? $request->peso : peso_por_defecto($request->tipo_evaluacion),
             'fecha_entrega' => $request->fecha_entrega,
             'archivo_path' => $archivoPath,
             'activo' => 1,
@@ -91,7 +93,7 @@ class ActividadController extends Controller
             ->join('periodos as p', 'p.id', '=', 'a.periodo_id')
             ->join('users as u', 'u.id', '=', 'a.docente_id')
             ->where('a.id', $id)
-            ->select('a.*', 'c.nombre as curso_nombre', 'g.nombre as grado_nombre', 'p.nombre as periodo_nombre', 'u.nombre as docente_nombre')
+            ->select('a.*', 'c.nombre as curso_nombre', 'g.nombre as grado_nombre', 'g.nivel as grado_nivel', 'p.nombre as periodo_nombre', 'u.nombre as docente_nombre')
             ->first();
 
         abort_if(!$actividad, 404);
@@ -113,26 +115,37 @@ class ActividadController extends Controller
     /** Registra la nota de un estudiante para la actividad y sincroniza la nota en el libro de calificaciones. */
     public function calificar(Request $request, $actividadId, $estudianteId)
     {
-        $request->validate([
-            'nota' => 'required|numeric|min:0|max:20',
-            'observacion_docente' => 'nullable|string|max:500',
-        ]);
-
         $rol = session('user_rol');
         $docenteId = session('user_id');
 
-        $actividad = DB::table('actividades')->where('id', $actividadId)->first();
+        $actividad = DB::table('actividades as a')
+            ->join('grados as g', 'g.id', '=', 'a.grado_id')
+            ->where('a.id', $actividadId)
+            ->select('a.*', 'g.nivel as grado_nivel')
+            ->first();
         abort_if(!$actividad, 404);
 
         if ($rol === 'docente' && $actividad->docente_id !== $docenteId) {
             abort(403, 'No tienes permiso para calificar esta actividad.');
         }
 
+        $esPrimaria = es_nivel_primaria($actividad->grado_nivel);
+
+        $request->validate([
+            'nota' => $esPrimaria ? 'nullable' : 'required|numeric|min:0|max:20',
+            'nota_letra' => $esPrimaria ? 'required|in:AD,A,B,C' : 'nullable|in:AD,A,B,C',
+            'observacion_docente' => 'nullable|string|max:500',
+        ]);
+
+        $notaLetra = $esPrimaria ? $request->nota_letra : null;
+        $notaNumerica = $esPrimaria ? nota_desde_letra($notaLetra) : $request->nota;
+
         $entrega = DB::table('entregas_actividad')->where('actividad_id', $actividadId)->where('estudiante_id', $estudianteId)->first();
         abort_if(!$entrega, 404);
 
         DB::table('entregas_actividad')->where('id', $entrega->id)->update([
-            'nota' => $request->nota,
+            'nota' => $notaNumerica,
+            'nota_letra' => $notaLetra,
             'observacion_docente' => $request->observacion_docente,
             'estado' => 'calificado',
             'calificado_en' => now(),
@@ -148,8 +161,10 @@ class ActividadController extends Controller
             'grado_id' => $actividad->grado_id,
             'tipo_evaluacion' => $actividad->tipo_evaluacion,
             'nombre_evaluacion' => $actividad->titulo,
-            'nota' => $request->nota,
+            'nota' => $notaNumerica,
+            'nota_letra' => $notaLetra,
             'nota_maxima' => 20,
+            'peso' => $actividad->peso ?? peso_por_defecto($actividad->tipo_evaluacion),
             'fecha' => now()->format('Y-m-d'),
         ];
 
@@ -163,7 +178,7 @@ class ActividadController extends Controller
             ]));
         }
 
-        registrar_auditoria('calificar', 'actividades', null, "{$actividad->titulo}: {$request->nota}/20");
+        registrar_auditoria('calificar', 'actividades', null, "{$actividad->titulo}: " . ($notaLetra ?? "{$notaNumerica}/20"));
 
         return back()->with('success', 'Nota registrada. Se sumó al bimestre correspondiente.');
     }

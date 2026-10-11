@@ -24,6 +24,19 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Notifications dropdown
+    const notifMenu     = document.getElementById('notifMenuToggle');
+    const notifDropdown = document.getElementById('notifDropdown');
+    if (notifMenu && notifDropdown) {
+        notifMenu.addEventListener('click', function (e) {
+            e.stopPropagation();
+            notifDropdown.classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            notifDropdown.classList.remove('open');
+        });
+    }
+
     // Alerts auto-close
     document.querySelectorAll('.alert-close').forEach(btn => {
         btn.addEventListener('click', function () { this.closest('.alert').remove(); });
@@ -74,6 +87,66 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!isNaN(val)) {
             cell.classList.add(val >= 14 ? 'nota-alta' : val >= 11 ? 'nota-media' : 'nota-baja');
         }
+    });
+
+    // Selects con búsqueda (data-searchable): útil cuando el <select> tiene muchas
+    // opciones (ej. la lista completa de estudiantes del colegio) y elegir a mano
+    // se vuelve difícil. Envuelve el <select> original en un buscador tipo autocompletar,
+    // manteniendo el <select> como fuente de verdad para el envío del formulario.
+    document.querySelectorAll('select[data-searchable]').forEach(function (select) {
+        const wrap = document.createElement('div');
+        wrap.className = 'ss-wrap';
+        select.parentNode.insertBefore(wrap, select);
+        wrap.appendChild(select);
+        select.classList.add('ss-native');
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control';
+        input.placeholder = select.dataset.placeholder || 'Escribe para buscar...';
+        input.autocomplete = 'off';
+        wrap.appendChild(input);
+
+        const list = document.createElement('div');
+        list.className = 'ss-list';
+        wrap.appendChild(list);
+
+        function options() {
+            return Array.from(select.options).filter(o => o.value !== '');
+        }
+        function syncInputFromSelect() {
+            const opt = select.options[select.selectedIndex];
+            input.value = (opt && opt.value) ? opt.textContent.trim() : '';
+        }
+        function renderList(filtro) {
+            const f = (filtro || '').toLowerCase();
+            const items = options().filter(o => o.textContent.toLowerCase().includes(f));
+            list.innerHTML = '';
+            if (!items.length) {
+                const vacio = document.createElement('div');
+                vacio.className = 'ss-empty';
+                vacio.textContent = 'Sin resultados';
+                list.appendChild(vacio);
+            }
+            items.forEach(o => {
+                const item = document.createElement('div');
+                item.className = 'ss-item' + (o.value === select.value ? ' active' : '');
+                item.textContent = o.textContent.trim();
+                item.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    select.value = o.value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    syncInputFromSelect();
+                    list.classList.remove('open');
+                });
+                list.appendChild(item);
+            });
+        }
+        input.addEventListener('focus', function () { renderList(''); list.classList.add('open'); input.select(); });
+        input.addEventListener('input', function () { renderList(input.value); list.classList.add('open'); });
+        input.addEventListener('blur', function () { setTimeout(() => list.classList.remove('open'), 150); });
+
+        syncInputFromSelect();
     });
 
     // Confirmación de borrado

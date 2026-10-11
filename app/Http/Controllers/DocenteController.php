@@ -73,7 +73,7 @@ class DocenteController extends Controller
                 'a.id as asignacion_id', 'c.nombre as curso', 'g.id as grado_id', 'g.nombre as grado', 'g.nivel',
                 'h.dia_semana', 'h.hora_inicio', 'h.hora_fin', 'h.aula',
                 DB::raw('(SELECT COUNT(DISTINCT m.estudiante_id) FROM matriculas m WHERE m.grado_id = a.grado_id AND m.activo = 1 AND m.anio_escolar = ' . $anio . ') as total_estudiantes'),
-                DB::raw('(SELECT ROUND(AVG(n.nota),1) FROM notas n JOIN matriculas m2 ON m2.estudiante_id = n.estudiante_id
+                DB::raw('(SELECT ROUND(SUM(n.nota*n.peso)/NULLIF(SUM(n.peso),0),1) FROM notas n JOIN matriculas m2 ON m2.estudiante_id = n.estudiante_id
                           WHERE n.curso_id = a.curso_id AND m2.grado_id = a.grado_id AND m2.activo = 1) as promedio')
             )
             ->orderByRaw("FIELD(g.nivel,'Primaria','Secundaria')")

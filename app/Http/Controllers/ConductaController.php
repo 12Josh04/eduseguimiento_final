@@ -92,7 +92,7 @@ class ConductaController extends Controller
                 DB::raw("COUNT(*) as total")
             )
             ->groupBy('estudiantes.id','estudiantes.nombre','estudiantes.apellido')
-            ->orderByDesc('negativas')->get();
+            ->orderByDesc('negativas')->orderBy('estudiantes.apellido')->orderBy('estudiantes.nombre')->get();
 
         return view('conductas.historial', compact('historial'));
     }

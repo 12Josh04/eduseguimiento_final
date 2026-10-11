@@ -22,7 +22,10 @@
     </div>
 </div>
 
-@php $gradoNombre = optional($grados->firstWhere('id', $gradoId))->nombre; @endphp
+@php
+    $gradoNombre = optional($grados->firstWhere('id', $gradoId))->nombre;
+    $esPrimaria = optional($grados->firstWhere('id', $gradoId))->nivel === 'Primaria';
+@endphp
 
 <div class="card" style="margin-bottom:1rem">
     <div class="card-header"><div class="card-title"><i class="fas fa-chart-bar"></i> Promedio general — {{ $gradoNombre }}</div></div>
@@ -43,7 +46,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>Sección</th><th>Estudiantes</th><th>Promedio</th><th>Nivel de logro</th>
+                    <th>Sección</th><th>Estudiantes</th>@if(!$esPrimaria)<th>Promedio</th>@endif<th>Nivel de logro</th>
                     <th>% Notas aprobadas</th><th>% Asistencia</th><th>Conductas negativas</th>
                 </tr>
             </thead>
@@ -52,7 +55,7 @@
                 <tr>
                     <td><strong>{{ $gradoNombre }} "{{ $c->seccion }}"</strong></td>
                     <td>{{ $c->total_estudiantes }}</td>
-                    <td>{{ $c->promedio ?? '—' }}</td>
+                    @if(!$esPrimaria)<td>{{ $c->promedio ?? '—' }}</td>@endif
                     <td>
                         @if($c->nl)
                             <span style="font-weight:800;color:{{ nivel_logro_color($c->nl) }}">{{ $c->nl }}</span>
@@ -71,7 +74,7 @@
                     </td>
                 </tr>
                 @empty
-                <tr><td colspan="7"><div class="empty-state" style="padding:2rem"><p>Este grado no tiene secciones configuradas.</p></div></td></tr>
+                <tr><td colspan="{{ $esPrimaria ? 6 : 7 }}"><div class="empty-state" style="padding:2rem"><p>Este grado no tiene secciones configuradas.</p></div></td></tr>
                 @endforelse
             </tbody>
         </table>

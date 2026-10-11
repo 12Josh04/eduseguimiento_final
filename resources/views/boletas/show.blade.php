@@ -158,6 +158,30 @@
     </table>
 
     <table style="margin-top:1rem">
+        <thead>
+            <tr>
+                <th class="col-header" rowspan="2">Bimestre</th>
+                <th class="col-header" colspan="3">Conducta</th>
+                <th class="col-header" rowspan="2">NL</th>
+            </tr>
+            <tr>
+                <th class="col-header">Positivas</th><th class="col-header">Negativas</th><th class="col-header">Observaciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach($conductaPorBimestre as $c)
+            <tr>
+                <td style="text-align:center;font-weight:700">{{ $c['periodo'] }}</td>
+                <td style="text-align:center">{{ $c['positivas'] ?: '-' }}</td>
+                <td style="text-align:center">{{ $c['negativas'] ?: '-' }}</td>
+                <td style="text-align:center">{{ $c['observaciones'] ?: '-' }}</td>
+                <td class="nl-cell nl-{{ $c['nl'] }}">{{ $c['nl'] }}</td>
+            </tr>
+            @endforeach
+        </tbody>
+    </table>
+
+    <table style="margin-top:1rem">
         <tr><td class="lb-label" style="width:20%">Situación al finalizar el período</td><td>{{ $nlGeneral ? nivel_logro_texto($nlGeneral) : 'En proceso de evaluación' }}</td></tr>
     </table>
 

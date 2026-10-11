@@ -12,14 +12,10 @@ class CursoController extends Controller
     public function index()
     {
         $cursos = DB::table('cursos as c')
-            ->leftJoin('grados as g', 'g.id', '=', 'c.grado_id')
-            ->select('c.*', 'g.nombre as grado')
             ->orderBy('c.nombre')
             ->get();
 
-        $grados = DB::table('grados')->where('activo', 1)->orderBy('nombre')->get();
-        $secciones = DB::table('secciones')->where('activo', 1)->orderBy('grado_id')->orderBy('nombre')->get();
-        return view('cursos.index', compact('cursos', 'grados', 'secciones'));
+        return view('cursos.index', compact('cursos'));
     }
 
     public function store(Request $request)
@@ -27,24 +23,21 @@ class CursoController extends Controller
         $request->validate([
             'nombre' => 'required|string|max:80',
             'codigo' => 'required|string|max:10|unique:cursos,codigo',
-            'grado_id' => 'required|exists:grados,id',
-            'seccion' => 'required|string|max:10',
-            'anio_escolar' => 'required|numeric',
+            'area_curricular' => 'nullable|string|max:100',
         ]);
 
         DB::table('cursos')->insert([
             'id' => Str::uuid(),
             'nombre' => $request->nombre,
             'codigo' => $request->codigo,
-            'grado_id' => $request->grado_id,
-            'seccion' => $request->seccion,
-            'anio_escolar' => $request->anio_escolar,
+            'area_curricular' => $request->area_curricular,
+            'nivel' => 'Básica Regular',
             'activo' => 1,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
-        return back()->with('success', 'Curso registrado correctamente.');
+        return back()->with('success', 'Curso registrado correctamente. Ahora asígnalo a un docente y grado desde Asignaciones.');
     }
 
     public function update(Request $request, $id)
@@ -52,17 +45,13 @@ class CursoController extends Controller
         $request->validate([
             'nombre' => 'required|string|max:80',
             'codigo' => 'required|string|max:10|unique:cursos,codigo,' . $id,
-            'grado_id' => 'required|exists:grados,id',
-            'seccion' => 'required|string|max:10',
-            'anio_escolar' => 'required|numeric',
+            'area_curricular' => 'nullable|string|max:100',
         ]);
 
         DB::table('cursos')->where('id', $id)->update([
             'nombre' => $request->nombre,
             'codigo' => $request->codigo,
-            'grado_id' => $request->grado_id,
-            'seccion' => $request->seccion,
-            'anio_escolar' => $request->anio_escolar,
+            'area_curricular' => $request->area_curricular,
             'updated_at' => now(),
         ]);
 

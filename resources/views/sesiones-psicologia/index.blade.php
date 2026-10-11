@@ -13,9 +13,16 @@
     @endif
 </div>
 
+@if(Auth::user()->rol === 'promotor')
+<div style="padding:.85rem 1.1rem;background:var(--primary-soft);border-radius:var(--radius);margin-bottom:1rem;font-size:.85rem;color:var(--primary);display:flex;align-items:center;gap:.6rem">
+    <i class="fas fa-info-circle"></i>
+    Solo la <strong>psicóloga</strong> puede registrar sesiones nuevas, desde su propia cuenta. Como promotor, aquí solo puedes consultar el historial con fines de supervisión.
+</div>
+@endif
+
 <div class="filter-bar">
     <form method="GET" style="display:flex;gap:.75rem;align-items:center;width:100%">
-        <select name="estudiante" class="form-control" style="min-width:220px" onchange="this.form.submit()">
+        <select name="estudiante" class="form-control" style="min-width:220px" onchange="this.form.submit()" data-searchable data-placeholder="Buscar estudiante...">
             <option value="">Todos los estudiantes</option>
             @foreach($estudiantes as $e)
                 <option value="{{ $e->id }}" {{ request('estudiante') == $e->id ? 'selected' : '' }}>{{ $e->nombre }}</option>
@@ -78,7 +85,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label class="form-label">Estudiante *</label>
-                    <select name="estudiante_id" class="form-control" required>
+                    <select name="estudiante_id" class="form-control" required data-searchable data-placeholder="Escribe el nombre del estudiante...">
                         <option value="">— Seleccionar —</option>
                         @foreach($estudiantes as $e)<option value="{{ $e->id }}">{{ $e->nombre }}</option>@endforeach
                     </select>
